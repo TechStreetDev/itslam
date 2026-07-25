@@ -311,14 +311,6 @@ app.prepare().then(() => {
 			}
 		});
 
-		socket.on("add_bot", () =>
-			withLobby((lobby) => {
-				if (lobby.hostId !== currentPlayerId)
-					throw new Error("Only the host can add a bot.");
-				lobbyManager.addBot(lobby);
-			}),
-		);
-
 		socket.on("start_game", () =>
 			withLobby((lobby) => {
 				if (lobby.hostId !== currentPlayerId)
@@ -444,6 +436,14 @@ app.prepare().then(() => {
 		);
 
 		if (dev) {
+			socket.on("add_bot", () =>
+				withLobby((lobby) => {
+					if (lobby.hostId !== currentPlayerId)
+						throw new Error("Only the host can add a bot.");
+					lobbyManager.addBot(lobby);
+				}),
+			);
+
 			socket.on("dev_give_card", (spec: any) =>
 				withLobby((lobby) => {
 					if (!lobby.game || !currentPlayerId) return;

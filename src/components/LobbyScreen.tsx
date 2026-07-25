@@ -10,6 +10,7 @@ export function LobbyScreen({
 	onAddBot,
 	onSetPublic,
 	onKick,
+	isDev,
 }: {
 	state: LobbyView;
 	myId: string;
@@ -18,6 +19,7 @@ export function LobbyScreen({
 	onAddBot: () => void;
 	onSetPublic: (isPublic: boolean) => void;
 	onKick: (targetId: string) => void;
+	isDev?: boolean;
 }) {
 	const iAmHost = state.hostId === myId;
 	const minPlayers = 2;
@@ -85,7 +87,7 @@ export function LobbyScreen({
 						>
 							Start Game
 						</button>
-						{state.players.length < 4 && (
+						{isDev && state.players.length < 4 && (
 							<button
 								onClick={onAddBot}
 								className="w-full mb-2 font-extrabold text-[15px] px-5 py-3 rounded-full shadow bg-[#9a7888] text-white hover:brightness-105 active:translate-y-px transition"

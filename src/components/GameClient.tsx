@@ -56,6 +56,7 @@ export function GameClient() {
 					onStart={() => emit("start_game")}
 					onLeave={leaveLobby}
 					onAddBot={() => emit("add_bot")}
+					isDev={process.env.NODE_ENV === "development"}
 					onSetPublic={setPublic}
 					onKick={kickPlayer}
 				/>
