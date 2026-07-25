@@ -1,0 +1,39 @@
+{
+  "name": "itslam",
+  "version": "1.0.0",
+  "description": "Online multiplayer adaptation of \"Is That Sheep Looking At Me? The Card Game\" - built with Next.js, TypeScript, Tailwind CSS, and Socket.IO.",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "dev": "tsx watch server.ts",
+    "build": "next build",
+    "start": "NODE_ENV=production tsx server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx test/engine.test.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "AGPL-3.0",
+  "dependencies": {
+    "next": "^14.2.35",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
+    "tsx": "^4.23.1",
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^26.1.1",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "autoprefixer": "^10.5.4",
+    "canvas": "^3.2.3",
+    "pdfjs-dist": "^6.1.200",
+    "postcss": "^8.5.19",
+    "prettier": "^3.9.5",
+    "puppeteer-core": "^25.3.0",
+    "tailwindcss": "^4.3.3"
+  }
+}
