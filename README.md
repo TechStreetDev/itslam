@@ -10,7 +10,7 @@ Is That Sheep Looking At Me? is a light, chaotic card game designed by Minecraft
 
 This web app adapts those mechanics for **real-time online play**: create a lobby, share a 4-letter code, and your friends join from any browser - no download, no account.
 
-Built with **Next.js 14 (App Router) + TypeScript + Tailwind CSS v4**, with a custom Node server that attaches **Socket.IO** for real-time lobbies.
+Built with **Next.js, TypeScript & Tailwin**, with a custom Node server that attaches **Socket.IO & IORedis** for real-time lobbies.
 
 ## Quick start
 

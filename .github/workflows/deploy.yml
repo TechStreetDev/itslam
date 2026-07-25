@@ -51,6 +51,7 @@ jobs:
 
             docker run -d \
               --name itslam \
+              --env-file /etc/itslam/.env \
               -p 127.0.0.1:3000:3000 \
               ghcr.io/techstreetdev/itslam:latest
             

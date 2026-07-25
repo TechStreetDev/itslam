@@ -4,6 +4,8 @@ import { Server, Socket } from "socket.io";
 import * as engine from "./src/lib/engine";
 import { lobbyManager, Lobby } from "./src/lib/lobbyManager";
 import * as bot from "./src/lib/bot";
+import { connectRedis } from "./src/lib/redis";
+import { saveLobby, deleteLobby as deleteFromRedis, loadAllLobbies } from "./src/lib/persistence";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = parseInt(process.env.PORT || "3000", 10);
@@ -16,7 +18,7 @@ const pendingBotActions = new Set<string>();
 const pendingReflipTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const pendingResetTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-app.prepare().then(() => {
+app.prepare().then(async () => {
 	const httpServer = createServer((req, res) => handle(req, res));
 	const io = new Server(httpServer);
 
@@ -24,6 +26,24 @@ app.prepare().then(() => {
 		pendingResetTimers.delete(lobby.code);
 		if (!lobby.game?.ended) return;
 		lobby.game = null;
+
+		// Remove players who were bot-replacements for disconnected humans
+		lobby.players = lobby.players.filter(p => !p.isReplacement);
+
+		// If no humans remain, disband rather than leaving an empty/all-bot lobby
+		if (!lobby.players.some(p => !p.isBot)) {
+			disbandLobbyAll(lobby);
+			return;
+		}
+
+		// If the host was removed (was a replacement bot), pass host or disband
+		if (!lobby.players.some(p => p.id === lobby.hostId)) {
+			if (!lobbyManager.passHost(lobby)) {
+				disbandLobbyAll(lobby);
+				return;
+			}
+		}
+
 		broadcast(lobby);
 	}
 
@@ -43,6 +63,7 @@ app.prepare().then(() => {
 				setTimeout(() => resetLobbyGame(lobby), 12000),
 			);
 		}
+		saveLobby(lobby);
 	}
 
 	function clearReflipTimer(code: string) {
@@ -162,12 +183,37 @@ app.prepare().then(() => {
 		if (lobby.game && lobby.game.started && !lobby.game.ended) {
 			p.connected = true;
 			p.isBot = true;
+			p.isReplacement = true;
 			p.socketId = null;
 		} else {
 			p.connected = false;
 			p.socketId = null;
 		}
 	}
+
+	function disbandLobbyAll(lobby: Lobby) {
+		for (const p of lobby.players) {
+			if (p.socketId) {
+				io.to(p.socketId).emit("disbanded");
+				io.sockets.sockets.get(p.socketId)?.leave(lobby.code);
+			}
+		}
+		deleteFromRedis(lobby.code);
+		lobbyManager.deleteLobby(lobby.code);
+	}
+
+	connectRedis();
+	const storedLobbies = await loadAllLobbies();
+	for (const lobby of storedLobbies) {
+		lobbyManager.loadLobby(lobby);
+		if (lobby.game && !lobby.game.ended) {
+			if (lobby.game.pendingChallenge?.stage === "awaiting_reflip")
+				startReflipTimer(lobby);
+			scheduleBotAction(lobby);
+		}
+	}
+	if (storedLobbies.length > 0)
+		console.log(`> Restored ${storedLobbies.length} lobby/lobbies from Redis`);
 
 	setInterval(() => lobbyManager.removeEmptyLobbies(), 60 * 1000).unref();
 
@@ -262,7 +308,8 @@ app.prepare().then(() => {
 					currentPlayerId = playerId;
 					p.socketId = socket.id;
 					p.connected = true;
-					p.isBot = false; // Restore human control on rejoin
+					p.isBot = false;
+					p.isReplacement = false;
 					socket.join(lobby.code);
 					socket.emit("joined", { code: lobby.code, playerId });
 					broadcast(lobby);
@@ -278,7 +325,9 @@ app.prepare().then(() => {
 					throw new Error(
 						"Only the host can change lobby visibility.",
 					);
+				const oldCode = lobby.code;
 				lobbyManager.setLobbyPublic(lobby, isPublic);
+				if (lobby.code !== oldCode) deleteFromRedis(oldCode);
 				currentCode = lobby.code; // code may have changed if made private
 			}),
 		);
@@ -491,6 +540,7 @@ app.prepare().then(() => {
 					io.sockets.sockets.get(p.socketId)?.leave(lobby.code);
 				}
 			}
+			deleteFromRedis(lobby.code);
 			lobbyManager.deleteLobby(lobby.code);
 		}
 
@@ -498,7 +548,11 @@ app.prepare().then(() => {
 			if (!currentCode) return;
 			const lobby = lobbyManager.getLobby(currentCode);
 			if (lobby) {
-				if (currentPlayerId === lobby.hostId && !lobbyManager.passHost(lobby)) {
+				if (lobby.game && lobby.game.started && !lobby.game.ended) {
+					// Mid-game - replace with bot as host passing/disbanding is deferred to game end
+					replaceWithBot(lobby, currentPlayerId);
+					broadcast(lobby);
+				} else if (currentPlayerId === lobby.hostId && !lobbyManager.passHost(lobby)) {
 					disbandLobby(lobby);
 				} else {
 					replaceWithBot(lobby, currentPlayerId);
@@ -513,7 +567,11 @@ app.prepare().then(() => {
 			if (!currentCode) return;
 			const lobby = lobbyManager.getLobby(currentCode);
 			if (lobby) {
-				if (currentPlayerId === lobby.hostId && !lobbyManager.passHost(lobby)) {
+				if (lobby.game && lobby.game.started && !lobby.game.ended) {
+					// Mid-game - replace with bot as host passing/disbanding is deferred to game end
+					replaceWithBot(lobby, currentPlayerId);
+					broadcast(lobby);
+				} else if (currentPlayerId === lobby.hostId && !lobbyManager.passHost(lobby)) {
 					disbandLobby(lobby);
 				} else {
 					replaceWithBot(lobby, currentPlayerId);

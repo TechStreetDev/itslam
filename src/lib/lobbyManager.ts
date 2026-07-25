@@ -14,6 +14,7 @@ export interface LobbyPlayer {
 	socketId: string | null;
 	connected: boolean;
 	isBot?: boolean;
+	isReplacement?: boolean; // true when a human was swapped for a bot mid-game
 }
 
 export interface Lobby {
@@ -134,6 +135,7 @@ export class LobbyManager {
 			lobby.code = newCode;
 			this.lobbies.set(newCode, lobby);
 		}
+		
 		lobby.isPublic = isPublic;
 	}
 
@@ -155,6 +157,16 @@ export class LobbyManager {
 			page,
 			pageSize,
 		};
+	}
+
+	getAllLobbies(): Lobby[] {
+		return Array.from(this.lobbies.values());
+	}
+
+	loadLobby(lobby: Lobby): void {
+		// Reset createdAt so removeEmptyLobbies allows time to reconnect
+		lobby.createdAt = Date.now();
+		this.lobbies.set(lobby.code, lobby);
 	}
 
 	passHost(lobby: Lobby): boolean {
@@ -213,19 +225,17 @@ export class LobbyManager {
 			discard: g.discard,
 			discardCount: g.discard.length,
 			players: playersView,
-			pendingChallenge: pc
-				? {
-						challengerId: pc.challengerId,
-						targetId: pc.targetId,
-						challengeType: pc.challengeType,
-						guess: pc.guess,
-						stage: pc.stage,
-						winnerId: pc.winnerId,
-						loserId: pc.loserId,
-						flipResult: pc.flipResult,
-						flipCount: pc.flipCount,
-					}
-				: null,
+			pendingChallenge: pc ? {
+				challengerId: pc.challengerId,
+				targetId: pc.targetId,
+				challengeType: pc.challengeType,
+				guess: pc.guess,
+				stage: pc.stage,
+				winnerId: pc.winnerId,
+				loserId: pc.loserId,
+				flipResult: pc.flipResult,
+				flipCount: pc.flipCount,
+			} : null,
 			log: g.log.slice(-40),
 			finalRoundActive: g.finalRoundActive,
 			finalRoundRemaining: g.finalRoundQueue?.length ?? 0,
