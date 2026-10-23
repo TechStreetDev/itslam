@@ -1,9 +1,12 @@
 import * as engine from "./engine";
+import { PACKS, normalizePacks } from "./deck";
 import {
 	GameState,
 	GameView,
 	LobbyView,
 	LobbiesPage,
+	MAX_PLAYERS,
+	PackId,
 	PlayerView,
 	PublicLobbyEntry,
 } from "./types";
@@ -15,6 +18,7 @@ export interface LobbyPlayer {
 	connected: boolean;
 	isBot?: boolean;
 	isReplacement?: boolean; // true when a human was swapped for a bot mid-game
+	tutorialSeen?: boolean; // finished or skipped the tutorial in an earlier game in this lobby
 }
 
 export interface Lobby {
@@ -24,10 +28,13 @@ export interface Lobby {
 	game: GameState | null;
 	createdAt: number;
 	isPublic: boolean;
+	// Card packs shuffled into the deck - missing on lobbies saved before packs existed
+	packs?: PackId[];
+	// Discord Activity instance this lobby belongs to - everyone in that voice channel shares it
+	activityId?: string;
 }
 
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const MAX_PLAYERS = 4;
 const MIN_PLAYERS = 2;
 
 const BOT_NAMES = [
@@ -40,6 +47,8 @@ const BOT_NAMES = [
 
 export class LobbyManager {
 	private lobbies = new Map<string, Lobby>();
+	// Called just before a lobby is removed - used to record abandoned games
+	onRemove?: (lobby: Lobby) => void;
 
 	private genCode(): string {
 		let code: string;
@@ -61,9 +70,16 @@ export class LobbyManager {
 			game: null,
 			createdAt: Date.now(),
 			isPublic: false,
+			packs: normalizePacks([]),
 		};
 		this.lobbies.set(code, lobby);
 		return lobby;
+	}
+
+	findActivityLobby(activityId: string): Lobby | undefined {
+		for (const lobby of this.lobbies.values())
+			if (lobby.activityId === activityId) return lobby;
+		return undefined;
 	}
 
 	getLobby(code: string | undefined | null): Lobby | undefined {
@@ -88,6 +104,8 @@ export class LobbyManager {
 	}
 
 	deleteLobby(code: string): void {
+		const lobby = this.lobbies.get(code);
+		if (lobby) this.onRemove?.(lobby);
 		this.lobbies.delete(code);
 	}
 
@@ -95,7 +113,7 @@ export class LobbyManager {
 		for (const [code, lobby] of this.lobbies) {
 			const anyConnected = lobby.players.some((p) => p.connected);
 			if (!anyConnected && Date.now() - lobby.createdAt > 5 * 60 * 1000)
-				this.lobbies.delete(code);
+				this.deleteLobby(code);
 		}
 	}
 
@@ -104,8 +122,18 @@ export class LobbyManager {
 			throw new Error(`Need at least ${MIN_PLAYERS} players to start.`);
 		if (lobby.players.length > MAX_PLAYERS)
 			throw new Error(`Maximum ${MAX_PLAYERS} players.`);
+		const offline = lobby.players.find((p) => !p.connected && !p.isBot);
+		if (offline)
+			throw new Error(
+				`${offline.name} is offline - please wait for them to reconnect or kick them from the lobby.`,
+			);
 		lobby.game = engine.createGame(
-			lobby.players.map((p) => ({ id: p.id, name: p.name })),
+			lobby.players.map((p) => ({
+				id: p.id,
+				name: p.name,
+				skipTutorial: p.isBot || p.tutorialSeen,
+			})),
+			normalizePacks(lobby.packs),
 		);
 		return lobby.game;
 	}
@@ -139,6 +167,18 @@ export class LobbyManager {
 		lobby.isPublic = isPublic;
 	}
 
+	setLobbyPacks(lobby: Lobby, packs: string[], canUseHidden: boolean): void {
+		if (lobby.game && !lobby.game.ended)
+			throw new Error("Cannot change card packs during a game.");
+		const current = normalizePacks(lobby.packs);
+		const next = normalizePacks(packs);
+		// Anyone can switch a hidden pack off, but only playtesters can switch one on
+		const blocked = next.find((id) => PACKS[id].hidden && !current.includes(id));
+		if (blocked && !canUseHidden)
+			throw new Error(`Only playtesters can enable ${PACKS[blocked].name}.`);
+		lobby.packs = next;
+	}
+
 	listPublicLobbies(search?: string, page = 0, pageSize = 10): LobbiesPage {
 		const q = (search ?? "").toLowerCase().trim();
 		const all: PublicLobbyEntry[] = [];
@@ -149,7 +189,12 @@ export class LobbyManager {
 			const hostName = host?.name ?? "Shepherd";
 			if (q && !hostName.toLowerCase().includes(q) && !lobby.code.toLowerCase().includes(q))
 				continue;
-			all.push({ code: lobby.code, hostName, playerCount: lobby.players.length });
+			all.push({
+				code: lobby.code,
+				hostName,
+				playerCount: lobby.players.length,
+				packs: normalizePacks(lobby.packs),
+			});
 		}
 		return {
 			entries: all.slice(page * pageSize, (page + 1) * pageSize),
@@ -199,6 +244,8 @@ export class LobbyManager {
 				players: publicPlayers,
 				game: null,
 				isPublic: lobby.isPublic,
+				isActivity: !!lobby.activityId,
+				packs: normalizePacks(lobby.packs),
 			};
 		}
 
@@ -219,7 +266,8 @@ export class LobbyManager {
 		const gameView: GameView = {
 			order: g.order,
 			turnIndex: g.turnIndex,
-			currentPlayerId: engine.currentPlayerId(g),
+			// Nobody has the turn until the tutorial phase is over
+			currentPlayerId: g.phase === "tutorial" ? "" : engine.currentPlayerId(g),
 			phase: g.phase,
 			deckCount: g.deck.length,
 			discard: g.discard,
@@ -235,6 +283,10 @@ export class LobbyManager {
 				loserId: pc.loserId,
 				flipResult: pc.flipResult,
 				flipCount: pc.flipCount,
+				reflipMsLeft:
+					pc.stage === "awaiting_reflip" && pc.reflipDeadline
+						? Math.max(0, pc.reflipDeadline - Date.now())
+						: undefined,
 			} : null,
 			log: g.log.slice(-40),
 			finalRoundActive: g.finalRoundActive,
@@ -242,6 +294,8 @@ export class LobbyManager {
 			ended: g.ended,
 			results: g.results,
 			challengeUsedThisTurn: g.challengeUsedThisTurn,
+			tutorialProgress:
+				g.phase === "tutorial" && g.tutorial ? { ...g.tutorial } : null,
 		};
 
 		return {
@@ -250,6 +304,8 @@ export class LobbyManager {
 			players: publicPlayers,
 			game: gameView,
 			isPublic: lobby.isPublic,
+			isActivity: !!lobby.activityId,
+			packs: normalizePacks(lobby.packs),
 		};
 	}
 }

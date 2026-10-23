@@ -1,4 +1,11 @@
-import { Card, ChallengeType, Color } from "./types";
+import {
+	ActionType,
+	Card,
+	ChallengeType,
+	Color,
+	ModifierType,
+	PackId,
+} from "./types";
 
 export const COLORS: Exclude<Color, "rainbow">[] = [
 	"white",
@@ -49,7 +56,7 @@ export const CHALLENGE_TYPES = {
 
 export const CHALLENGE_META: Record<
 	ChallengeType,
-	{ name: string; color: string; desc: string }
+	{name: string; color: string; desc: string}
 > = {
 	lure2: {
 		name: "Lure 2 Sheep",
@@ -78,65 +85,100 @@ export const CHALLENGE_META: Record<
 	},
 };
 
-const COUNTS = {
-	wheat: 3,
-	wolf: 2,
-	yoink: 2,
-	reflip: 2,
-	paint: 2,
-	franken: 2,
+// Distributive Omit so each card variant keeps its own fields
+type DistributiveOmit<T, K extends keyof any> = T extends any ? Omit<T, K> : never;
+export type CardSpec = DistributiveOmit<Card, "id">;
+
+export interface CardPack {
+	id: PackId;
+	name: string;
+	description: string;
+	// Always included in every game and can't be toggled off
+	alwaysOn?: boolean;
+	// Only shown to, and can only be switched on by, playtesters and admins
+	hidden?: boolean;
+	cards: {card: CardSpec; count: number}[];
+}
+
+const sheepParts = (color: Color, rainbow = false, count = 1) => [
+	{card: {category: "head", color, rainbow} as CardSpec, count},
+	{card: {category: "butt", color, rainbow} as CardSpec, count},
+];
+
+const action = (action: ActionType, count: number) =>
+	({card: {category: "action", action} as CardSpec, count});
+
+const modifier = (modifier: ModifierType, count: number) =>
+	({card: {category: "modifier", modifier} as CardSpec, count});
+
+const challenge = (challengeType: ChallengeType, count = 1) =>
+	({card: {category: "challenge", challengeType} as CardSpec, count});
+
+// Card packs a lobby can include. To add a pack: add its id to PackId in
+// types.ts, define it here, and add it to PACK_ORDER.
+export const PACKS: Record<PackId, CardPack> = {
+	base: {
+		id: "base",
+		name: "Base Game",
+		description: "The original ITSLAM game.",
+		alwaysOn: true,
+		cards: [
+			...COLORS.flatMap((color) => sheepParts(color)),
+			...sheepParts("rainbow", true, 2),
+			action("wheat", 3),
+			action("wolf", 2),
+			action("yoink", 2),
+			action("reflip", 2),
+			modifier("paint", 2),
+			modifier("franken", 2),
+			...Object.values(CHALLENGE_TYPES).map((type) => challenge(type)),
+		],
+	},
+	expansion: {
+		id: "expansion",
+		name: "Expansion Pack",
+		description: "Extra cards shuffled in alongside the base game.",
+		hidden: true,
+		cards: [],
+	},
 };
+
+export const PACK_ORDER: PackId[] = ["base", "expansion"];
+
+// Validates a requested pack list, always keeping the always-on packs
+export function normalizePacks(packs: readonly string[] | undefined): PackId[] {
+	const wanted = new Set(packs ?? []);
+	return PACK_ORDER.filter((id) => PACKS[id].alwaysOn || wanted.has(id));
+}
+
+// Expansion packs - everything that isn't always on
+export const EXPANSION_PACKS: PackId[] = PACK_ORDER.filter((id) => !PACKS[id].alwaysOn);
+
+// "base,expansion" (as stored in the games table) or a pack list -> "Base Game + Expansion Pack"
+export function packsLabel(packs: string | readonly string[] | null | undefined): string {
+	const ids = typeof packs === "string" ? packs.split(",") : (packs ?? []);
+	if (ids.length === 0) return PACKS.base.name;
+	return ids.map((id) => PACKS[id as PackId]?.name ?? id).join(" + ");
+}
+
+export function packCardCount(id: PackId): number {
+	return PACKS[id].cards.reduce((sum, c) => sum + c.count, 0);
+}
 
 let idCounter = 1;
 function nextId(): string {
 	return "c" + idCounter++;
 }
 
-export function buildDeck(): Card[] {
+export function buildDeck(packs: readonly PackId[] = ["base"]): Card[] {
 	idCounter = 1;
 	const cards: Card[] = [];
 
-	for (const color of COLORS) {
-		cards.push({ id: nextId(), category: "head", color, rainbow: false });
-		cards.push({ id: nextId(), category: "butt", color, rainbow: false });
-	}
-
-	for (let i = 0; i < 2; i++) {
-		cards.push({
-			id: nextId(),
-			category: "head",
-			color: "rainbow",
-			rainbow: true,
-		});
-		
-		cards.push({
-			id: nextId(),
-			category: "butt",
-			color: "rainbow",
-			rainbow: true,
-		});
-	}
-
-	for (let i = 0; i < COUNTS.wheat; i++)
-		cards.push({ id: nextId(), category: "action", action: "wheat" });
-	for (let i = 0; i < COUNTS.wolf; i++)
-		cards.push({ id: nextId(), category: "action", action: "wolf" });
-	for (let i = 0; i < COUNTS.yoink; i++)
-		cards.push({ id: nextId(), category: "action", action: "yoink" });
-	for (let i = 0; i < COUNTS.reflip; i++)
-		cards.push({ id: nextId(), category: "action", action: "reflip" });
-
-	for (let i = 0; i < COUNTS.paint; i++)
-		cards.push({ id: nextId(), category: "modifier", modifier: "paint" });
-	for (let i = 0; i < COUNTS.franken; i++)
-		cards.push({ id: nextId(), category: "modifier", modifier: "franken" });
-
-	for (const type of Object.values(CHALLENGE_TYPES)) {
-		cards.push({
-			id: nextId(),
-			category: "challenge",
-			challengeType: type,
-		});
+	for (const packId of normalizePacks(packs)) {
+		for (const {card, count} of PACKS[packId].cards) {
+			for (let i = 0; i < count; i++)
+				cards.push({...card, id: nextId()} as Card);
+		}
 	}
 
 	return cards;
@@ -148,5 +190,6 @@ export function shuffle<T>(arr: T[]): T[] {
 		const j = Math.floor(Math.random() * (i + 1));
 		[a[i], a[j]] = [a[j], a[i]];
 	}
+	
 	return a;
 }

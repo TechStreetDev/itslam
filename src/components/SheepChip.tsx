@@ -131,7 +131,7 @@ export function SheepChip({
 				"drop-shadow-[0_3px_3px_rgba(0,0,0,0.18)]",
 				clickable ? "cursor-pointer" : "",
 				selected
-					? "outline outline-[3px] outline-[#b040a0] outline-offset-4 rounded-[8px]"
+					? "outline outline-[3px] outline-[#b040a0] outline-offset-2 rounded-[14px]"
 					: "",
 			].join(" ")}
 			onClick={(e) => {
@@ -149,7 +149,8 @@ export function SheepChip({
 					{badge}
 				</div>
 			)}
-			<div className="flex gap-1">
+			{/* Box grouping every card that makes up this one sheep */}
+			<div className="flex gap-1 p-1.5 rounded-[14px] border-2 border-[#9a4f8c] bg-white/35 backdrop-blur-[2px]">
 				<img
 					src={leftSrc}
 					alt=""

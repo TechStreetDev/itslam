@@ -23,19 +23,41 @@ export function ResultsOverlay({
 				{ranked.map((pid) => {
 					const p = game.players.find((x) => x.id === pid)!;
 					const isWinner = pid === results.winnerId;
+					const penalty = results.challengePenalties?.[pid] ?? 0;
+					const heldCards = penalty / 3;
 					return (
 						<div
 							key={pid}
-							className={`flex justify-between py-2 px-1 border-b border-dashed border-[#f5d0e8] font-bold ${isWinner ? "text-[#9e3878] text-lg" : ""}`}
+							className="py-2 px-1 border-b border-dashed border-[#f5d0e8]"
 						>
-							<span>
-								{p.name}
-								{isWinner ? " \ud83d\udc51" : ""}
-							</span>
-							<span>{results.scores[pid]} pts</span>
+							<div
+								className={`flex justify-between font-bold ${isWinner ? "text-[#9e3878] text-lg" : ""}`}
+							>
+								<span>
+									{p.name}
+									{isWinner ? " \ud83d\udc51" : ""}
+								</span>
+								<span>{results.scores[pid]} pts</span>
+							</div>
+							{penalty > 0 && (
+								<div className="flex justify-between gap-3 mt-1 text-xs font-bold text-[#c03060] text-left">
+									<span>
+										Held {heldCards} unused Challenge card
+										{heldCards === 1 ? "" : "s"}
+									</span>
+									<span className="whitespace-nowrap tabular-nums">
+										Lost {penalty} points
+									</span>
+								</div>
+							)}
 						</div>
 					);
 				})}
+				{ranked.some((pid) => (results.challengePenalties?.[pid] ?? 0) > 0) && (
+					<p className="text-[#8a5a70] text-xs font-semibold mt-3 mb-0">
+						Every Challenge card still in hand at the end costs 3 points.
+					</p>
+				)}
 				{results.wasTiebreak && (
 					<p className="text-[#8a5a70] font-semibold mt-3">
 						It was a tie - the winner was decided by a coin flip!

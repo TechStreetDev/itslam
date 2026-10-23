@@ -1,10 +1,9 @@
 name: Build and Publish ITSLAM
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]  # Or your deployment branch
-  schedule:
-    - cron: '0 8 * * 2,5'  # Every Tuesday and Friday at 8am UTC (after MaxMind publishes)
 
 jobs:
   build:
@@ -52,6 +51,7 @@ jobs:
             docker run -d \
               --name itslam \
               --env-file /etc/itslam/.env \
+              --network host \
               -p 127.0.0.1:3000:3000 \
               ghcr.io/techstreetdev/itslam:latest
             

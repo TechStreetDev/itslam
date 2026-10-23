@@ -1,5 +1,5 @@
 # === Production dependencies (no native modules) ===
-FROM node:22-alpine AS deps
+FROM node:24-alpine AS deps
 
 RUN apk upgrade --no-cache
 
@@ -9,7 +9,7 @@ COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev
 
 # === Builder stage (needs devDeps + build tools for canvas/next build) ===
-FROM node:22-alpine AS builder
+FROM node:24-alpine AS builder
 
 RUN apk upgrade --no-cache
 
@@ -24,7 +24,7 @@ COPY . .
 RUN npm run build
 
 # === Production runtime image ===
-FROM node:22-alpine AS runner
+FROM node:24-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
@@ -41,6 +41,7 @@ COPY --from=builder /app/next.config.js ./next.config.js
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 COPY --from=builder /app/server.ts ./server.ts
 COPY --from=builder /app/src ./src
+COPY --from=builder /app/migrations ./migrations
 
 EXPOSE 3000
 

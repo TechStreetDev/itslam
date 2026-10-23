@@ -1,0 +1,14 @@
+CREATE TABLE game_events (
+	id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+	game_id INT UNSIGNED NOT NULL,
+	seq INT UNSIGNED NOT NULL,
+	t_ms INT UNSIGNED NOT NULL,
+	turn SMALLINT UNSIGNED NOT NULL,
+	type VARCHAR(32) NOT NULL,
+	actor_seat TINYINT UNSIGNED NULL,
+	target_seat TINYINT UNSIGNED NULL,
+	data JSON NULL,
+	INDEX idx_events_game (game_id, seq),
+	INDEX idx_events_type (type),
+	CONSTRAINT fk_events_game FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+);

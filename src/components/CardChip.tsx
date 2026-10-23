@@ -22,25 +22,37 @@ export function CardChip({
 	mini,
 	selected,
 	discardPick,
+	disabled,
+	drawn,
 	onClick,
 }: {
 	card: Card;
 	mini?: boolean;
 	selected?: boolean;
 	discardPick?: boolean;
+	disabled?: boolean;
+	drawn?: boolean;
 	onClick?: (c: Card) => void;
 }) {
 	return (
 		<div
-			onClick={() => onClick?.(card)}
+			onClick={() => !disabled && onClick?.(card)}
 			className={[
-				"relative flex-shrink-0 rounded-[8px] overflow-hidden cursor-pointer select-none transition-transform duration-100 shadow-[0_2px_4px_rgba(0,0,0,0.3)]",
+				"relative flex-shrink-0 rounded-[8px] overflow-hidden select-none transition-[transform,filter,box-shadow] duration-300",
 				mini
 					? "w-[46px] h-[64px] md:w-[54px] md:h-[76px]"
-					: "w-[74px] h-[104px] md:w-[90px] md:h-[126px] lg:w-[104px] lg:h-[146px]",
+					: "w-[74px] h-[104px] md:w-[90px] md:h-[126px] lg:w-[104px] lg:h-[146px] short:w-[74px] short:h-[104px]",
+				disabled
+					? "cursor-default brightness-65"
+					: "cursor-pointer",
 				selected
 					? "-translate-y-[18px] shadow-[0_0_0_4px_#b040a0,0_0_20px_rgba(176,64,160,0.65),0_10px_20px_rgba(0,0,0,0.35)]"
-					: "hover:-translate-y-1",
+					: [
+							drawn
+								? "shadow-[0_0_0_2px_rgba(255,214,110,0.85),0_0_14px_rgba(255,200,80,0.55),0_2px_4px_rgba(0,0,0,0.3)]"
+								: "shadow-[0_2px_4px_rgba(0,0,0,0.3)]",
+							disabled ? "" : "hover:-translate-y-1",
+						].join(" "),
 				discardPick
 					? "outline outline-[3px] outline-dashed outline-[#c03060] outline-offset-2"
 					: "",

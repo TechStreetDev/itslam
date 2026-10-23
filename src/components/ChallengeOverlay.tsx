@@ -6,6 +6,10 @@ import { CHALLENGE_META, cardMeta } from "@/lib/cardMeta";
 import { SheepChip } from "./SheepChip";
 import { CardChip } from "./CardChip";
 
+// Keep in sync with FLIP_ANIMATION_MS / REFLIP_WINDOW_MS in server.ts
+const FLIP_ANIMATION_MS = 2000;
+const REFLIP_WINDOW_MS = 10000;
+
 export function ChallengeOverlay({
 	game,
 	myId,
@@ -27,7 +31,7 @@ export function ChallengeOverlay({
 		if (pc.stage === "awaiting_reflip" && fc > animFlipCountRef.current) {
 			animFlipCountRef.current = fc;
 			setFlipping(true);
-			const t = setTimeout(() => setFlipping(false), 1200);
+			const t = setTimeout(() => setFlipping(false), FLIP_ANIMATION_MS);
 			return () => clearTimeout(t);
 		}
 	}, [pc.flipCount, pc.stage]);
@@ -37,20 +41,18 @@ export function ChallengeOverlay({
 		(pc.stage === "awaiting_reflip" &&
 			(pc.flipCount ?? 0) > animFlipCountRef.current);
 
-	// Countdown timer for the reflip window (6s, resets on each reflip)
-	const [countdown, setCountdown] = useState(6);
+	// Re-Flip window countdown. The server sends how long is left (including the
+	// flip animation); we turn that into a local deadline so clocks don't matter.
+	const deadlineRef = useRef(0);
+	const [msLeft, setMsLeft] = useState(0);
 	useEffect(() => {
-		if (pc.stage !== "awaiting_reflip") {
-			setCountdown(6);
-			return;
-		}
-		setCountdown(6);
-		const interval = setInterval(
-			() => setCountdown((prev) => Math.max(0, prev - 1)),
-			1000,
-		);
+		if (pc.stage !== "awaiting_reflip" || pc.reflipMsLeft === undefined) return;
+		deadlineRef.current = Date.now() + pc.reflipMsLeft;
+		const tick = () => setMsLeft(Math.max(0, deadlineRef.current - Date.now()));
+		tick();
+		const interval = setInterval(tick, 100);
 		return () => clearInterval(interval);
-	}, [pc.stage, pc.flipCount]);
+	}, [pc.stage, pc.flipCount, pc.reflipMsLeft]);
 
 	const challenger = game.players.find((p) => p.id === pc.challengerId)!;
 	const target = game.players.find((p) => p.id === pc.targetId)!;
@@ -101,16 +103,30 @@ export function ChallengeOverlay({
 			);
 		}
 
+		const other = pc.guess === "heads" ? "butts" : "heads";
 		return wrap(
 			<>
-				<h2 className="font-display text-2xl text-[#7a3a58] mt-0 mb-1">
+				<p className="uppercase tracking-wide font-extrabold text-[#8a5a70] text-xs mb-1">
+					{meta.name}
+				</p>
+				<h2 className="font-display text-2xl text-[#7a3a58] mt-0 mb-3">
 					{challenger.name} vs {target.name}
 				</h2>
-				<p className="mb-2">
-					{challenger.name} guessed <b>{pc.guess}</b>. {meta.name}
+				<Stakes
+					rows={[
+						{ face: pc.guess!, winner: challenger.name },
+						{ face: other, winner: target.name },
+					]}
+				/>
+				<p className="text-[13px] text-[#5a3048] mb-1">
+					<b>Winner gets to:</b> {meta.desc}
 				</p>
-				<div className="coin-face w-[90px] h-[90px] rounded-full mx-auto my-2.5 flex items-center justify-center font-display font-extrabold text-[#7a3a58]">
-					FLIP ME
+				<div className="coin-face w-[90px] h-[90px] rounded-full mx-auto my-2.5 overflow-hidden">
+					<img
+						src="/assets/coin/unknown.png"
+						className="w-full h-full object-cover"
+						alt="Coin waiting to be flipped"
+					/>
 				</div>
 				{pc.targetId !== myId && (
 					<p className="text-[#8a5a70] font-semibold">
@@ -132,53 +148,113 @@ export function ChallengeOverlay({
 
 	if (pc.stage === "awaiting_reflip") {
 		const winner = game.players.find((p) => p.id === pc.winnerId);
-		const myReflip = myHand.find(
+		const loser = game.players.find((p) => p.id === pc.loserId);
+		const myReflips = myHand.filter(
 			(c) => c.category === "action" && c.action === "reflip",
 		);
 		const resultLabel =
 			pc.flipResult === "heads" ? "👀 Heads!" : "🐑 Butts!";
-		const coinSrc =
-			pc.flipResult === "heads"
-				? "/assets/coin/front.png"
-				: "/assets/coin/back.png";
+		// The server's deadline includes the animation; only count the window itself
+		const windowLeft = Math.min(REFLIP_WINDOW_MS, msLeft);
+		const secondsLeft = Math.ceil(windowLeft / 1000);
+		const pctLeft = (windowLeft / REFLIP_WINDOW_MS) * 100;
+		const reflipPitch =
+			pc.loserId === myId
+				? "You're losing this flip - flip the coin again for another chance!"
+				: pc.winnerId === myId
+					? "You're winning - a Re-Flip would risk your win."
+					: `Flip again to give ${loser?.name ?? "them"} another chance.`;
 
 		return wrap(
 			<>
+				<p className="uppercase tracking-wide font-extrabold text-[#8a5a70] text-xs mb-1">
+					{meta.name}
+					{(pc.flipCount ?? 1) > 1 && ` · flip ${pc.flipCount}`}
+				</p>
 				<h2 className="font-display text-2xl text-[#7a3a58] mt-0 mb-1">
 					{isFlipping ? "Flipping…" : resultLabel}
 				</h2>
-				<p className="mb-2">
-					{!isFlipping && winner ? (
+				<p className="mb-2 min-h-[1.5em]">
+					{!isFlipping && winner && loser ? (
 						<>
-							<b>{winner.name}</b> wins the challenge!
+							<b>{winner.id === myId ? "You win" : `${winner.name} wins`}</b>
+							{" - "}
+							{meta.name} hits{" "}
+							<b>{loser.id === myId ? "you" : loser.name}</b>
 						</>
 					) : (
-						<>&nbsp;</>
+						<>
+							{challenger.name} guessed <b>{pc.guess}</b>
+						</>
 					)}
 				</p>
-				<div
-					className={`coin-face w-[90px] h-[90px] rounded-full mx-auto my-2.5 overflow-hidden${isFlipping ? " coin-flipping" : ""}`}
-				>
-					{pc.flipResult && (
-						<img
-							src={coinSrc}
-							className="w-full h-full object-cover"
-							alt={pc.flipResult}
-						/>
-					)}
-				</div>
-				<p className="text-[#8a5a70] text-sm font-semibold mb-3">
-					{isFlipping ? " " : `${countdown}s to re-flip`}
-				</p>
-				{myReflip && !isFlipping && (
-					<button
-						onClick={() =>
-							emit("play_reflip", { cardId: myReflip.id })
+				{/* Two-sided coin: both faces show while it spins, then it lands on the result */}
+				<div className="coin-3d w-[90px] h-[90px] mx-auto my-2.5">
+					<div
+						className={`coin-spinner${isFlipping ? " coin-flipping" : ""}`}
+						style={
+							{
+								"--coin-end": `${pc.flipResult === "butts" ? 3060 : 2880}deg`,
+								transform: `rotateY(${pc.flipResult === "butts" ? 180 : 0}deg)`,
+							} as React.CSSProperties
 						}
-						className="font-extrabold text-sm px-5 py-3 rounded-full shadow bg-[#e0609a] text-[#4a1a38] active:translate-y-px"
+						role="img"
+						aria-label={isFlipping ? "Coin flipping" : `Coin landed on ${pc.flipResult}`}
 					>
-						Play Re-Flip
-					</button>
+						<div className="coin-face coin-side">
+							<img src="/assets/coin/front.png" alt="" />
+						</div>
+						<div className="coin-face coin-side coin-side-back">
+							<img src="/assets/coin/back.png" alt="" />
+						</div>
+					</div>
+				</div>
+				{!isFlipping && (
+					<>
+						<div
+							className="mt-3 mb-1 h-2 rounded-full bg-[#f5d0e8] overflow-hidden"
+							role="progressbar"
+							aria-label="Re-Flip window"
+							aria-valuenow={secondsLeft}
+							aria-valuemin={0}
+							aria-valuemax={REFLIP_WINDOW_MS / 1000}
+						>
+							<div
+								className="h-full bg-[#c05090] transition-[width] duration-100 ease-linear"
+								style={{ width: `${pctLeft}%` }}
+							/>
+						</div>
+						<p className="text-[#8a5a70] text-[13px] font-semibold mb-3">
+							{secondsLeft > 0
+								? `${secondsLeft}s for anyone holding a 🔄 Re-Flip card to flip again`
+								: "Locking in the result…"}
+						</p>
+
+						{myReflips.length > 0 && secondsLeft > 0 && (
+							<div className="bg-white border-2 border-[#e0609a] rounded-2xl p-3 flex items-center gap-3 text-left">
+								<CardChip card={myReflips[0]} mini />
+								<div className="flex-1 min-w-0">
+									<p className="font-extrabold text-[#7a3a58] text-sm">
+										You have{" "}
+										{myReflips.length > 1
+											? `${myReflips.length} Re-Flips`
+											: "a Re-Flip"}
+									</p>
+									<p className="text-[12px] text-[#5a3048] font-semibold leading-snug">
+										{reflipPitch}
+									</p>
+								</div>
+								<button
+									onClick={() =>
+										emit("play_reflip", { cardId: myReflips[0].id })
+									}
+									className="shrink-0 font-extrabold text-sm px-4 py-3 rounded-full shadow bg-[#c05090] text-white hover:brightness-105 active:translate-y-px"
+								>
+									🔄 Re-Flip
+								</button>
+							</div>
+						)}
+					</>
 				)}
 			</>,
 		);
@@ -230,6 +306,27 @@ function GuessBtn({
 	);
 }
 
+// Shows what each coin face means before the flip
+function Stakes({ rows }: { rows: { face: "heads" | "butts"; winner: string }[] }) {
+	return (
+		<div className="grid grid-cols-2 gap-2 mb-3">
+			{rows.map((r) => (
+				<div
+					key={r.face}
+					className="bg-white rounded-xl border-2 border-[#f5d0e8] px-3 py-2 text-[13px]"
+				>
+					<p className="font-extrabold text-[#7a3a58]">
+						{r.face === "heads" ? "👀 Heads" : "🐑 Butts"}
+					</p>
+					<p className="text-[#5a3048] font-semibold leading-snug">
+						<b>{r.winner}</b> wins
+					</p>
+				</div>
+			))}
+		</div>
+	);
+}
+
 function SelectionBody({
 	pc,
 	loser,
@@ -245,7 +342,6 @@ function SelectionBody({
 	const [halves, setHalves] = useState<
 		{ sheepId: string; keepCardId: string }[]
 	>([]);
-	const [halvePicking, setHalvePicking] = useState<SheepEntity | null>(null);
 	const [recoverPicked, setRecoverPicked] = useState<Card[]>([]);
 
 	if (pc.challengeType === "lure2" || pc.challengeType === "remove2") {
@@ -298,76 +394,102 @@ function SelectionBody({
 	}
 
 	if (pc.challengeType === "halve2") {
+		const toggleSheep = (entity: SheepEntity) =>
+			setHalves((prev) => {
+				if (prev.some((h) => h.sheepId === entity.id))
+					return prev.filter((h) => h.sheepId !== entity.id);
+				if (prev.length >= 2) return prev;
+				// Pre-select the first half - the player can switch it below
+				return [...prev, { sheepId: entity.id, keepCardId: partsOf(entity)[0].id }];
+			});
+		const chooseHalf = (sheepId: string, keepCardId: string) =>
+			setHalves((prev) =>
+				prev.map((h) => (h.sheepId === sheepId ? { ...h, keepCardId } : h)),
+			);
+		const chosen = halves.flatMap((h) => {
+			const entity = loser.field.find((e) => e.id === h.sheepId);
+			return entity ? [{ ...h, entity }] : [];
+		});
+
 		return (
 			<>
 				<h2 className="font-display text-2xl text-[#7a3a58] mt-0 mb-2">
 					You won! &#127881;
 				</h2>
 				<p className="mb-2">
-					Pick up to 2 Sheep from {loser.name}'s field. For each,
-					choose which half you keep - the rest goes to {loser.name}.
+					Tap up to 2 of {loser.name}&rsquo;s Sheep to halve, then choose which
+					half you take. The other half goes back to {loser.name}&rsquo;s hand.
 				</p>
-				<div className="flex flex-wrap gap-2 justify-center my-3.5 max-h-[260px] overflow-y-auto">
-					{loser.field.map((entity) => (
-						<SheepChip
-							key={entity.id}
-							entity={entity}
-							clickable
-							selected={halves.some(
-								(h) => h.sheepId === entity.id,
-							)}
-							onClick={() => {
-								if (
-									halves.some(
-										(h) => h.sheepId === entity.id,
-									) ||
-									halves.length >= 2
-								)
-									return;
-								setHalvePicking(entity);
-							}}
-						/>
-					))}
+				<div className="flex flex-wrap gap-2 justify-center my-3 max-h-[200px] overflow-y-auto">
+					{loser.field.map((entity) => {
+						const isPicked = halves.some((h) => h.sheepId === entity.id);
+						return (
+							<SheepChip
+								key={entity.id}
+								entity={entity}
+								clickable={isPicked || halves.length < 2}
+								selected={isPicked}
+								onClick={() => toggleSheep(entity)}
+							/>
+						);
+					})}
 				</div>
-				<p className="text-[#8a5a70] font-semibold mb-2">
-					{halves.length}/2 chosen
+
+				{chosen.map(({ entity, keepCardId }, i) => (
+					<div
+						key={entity.id}
+						className="bg-white rounded-xl border-2 border-[#f5d0e8] p-3 mb-2 text-left"
+					>
+						<div className="flex items-center justify-between mb-2">
+							<p className="font-extrabold text-[13px] text-[#7a3a58]">
+								Sheep {i + 1}: which half do you take?
+							</p>
+							<button
+								onClick={() => toggleSheep(entity)}
+								className="text-[12px] font-extrabold text-[#8a5a70] underline"
+							>
+								Remove
+							</button>
+						</div>
+						<div className="flex gap-2">
+							{partsOf(entity).map((card) => {
+								const isKept = card.id === keepCardId;
+								return (
+									<button
+										key={card.id}
+										onClick={() => chooseHalf(entity.id, card.id)}
+										aria-pressed={isKept}
+										className={`flex-1 rounded-xl border-2 px-2 py-2 text-[13px] font-bold transition ${
+											isKept
+												? "border-[#c05090] bg-[#fde4f0] text-[#7a3a58]"
+												: "border-[#f5d0e8] bg-white text-[#8a5a70] hover:border-[#e0a0c0]"
+										}`}
+									>
+										<span className="block text-[11px] font-extrabold uppercase tracking-wide">
+											{isKept ? "✓ You take" : `${loser.name} gets`}
+										</span>
+										{cardMeta(card).label}
+									</button>
+								);
+							})}
+						</div>
+						{entity.modifierCard && (
+							<p className="text-[11px] text-[#8a5a70] font-semibold mt-1.5">
+								You also take its {cardMeta(entity.modifierCard).label} card.
+							</p>
+						)}
+					</div>
+				))}
+
+				<p className="text-[#8a5a70] font-semibold mb-2 text-sm">
+					{halves.length}/2 Sheep chosen
 				</p>
 				<button
 					onClick={() => emit("resolve_challenge_effect", { halves })}
 					className="font-extrabold text-sm px-5 py-3 rounded-full shadow bg-[#c05090] text-white active:translate-y-px"
 				>
-					Confirm
+					{halves.length === 0 ? "Halve nothing" : `Halve ${halves.length} Sheep`}
 				</button>
-
-				{halvePicking && (
-					<div className="fixed inset-0 bg-[rgba(0,0,0,0.55)] flex items-center justify-center z-[90] p-5">
-						<div className="bg-[#fff0f5] rounded-[22px] p-6 max-w-[360px] w-full text-center shadow-2xl">
-							<h3 className="font-display text-lg mb-3">
-								Which half do you keep?
-							</h3>
-							<div className="flex gap-2.5 justify-center flex-wrap">
-								{partsOf(halvePicking).map((card) => (
-									<button
-										key={card.id}
-										onClick={() => {
-											setHalves((prev) => [
-												...prev,
-												{
-													sheepId: halvePicking.id,
-													keepCardId: card.id,
-												},
-											]);
-											setHalvePicking(null);
-										}}
-										className="font-bold text-sm px-4 py-2 rounded-lg bg-[#e0609a] text-[#4a1a38]"
-									>
-										{cardMeta(card).label}
-									</button>
-								))}
-							</div>
-						</div>
-					</div>
-				)}
 			</>
 		);
 	}

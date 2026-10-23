@@ -6,10 +6,15 @@ import {
 	ButtCard,
 	ModifierCard,
 	PartCard,
+	PackId,
 	Player,
 	SheepEntity,
 	SheepKind,
 	PendingChallenge,
+	GameEventType,
+	GameEventData,
+	DISCARD_KINDS,
+	DiscardKind,
 	PlaySheepPayload,
 	PlayActionPayload,
 	BodyswapPayload,
@@ -40,17 +45,23 @@ function nextSheepId(): string {
 	return "s" + sheepIdCounter++;
 }
 
-export function createGame(players: { id: string; name: string }[]): GameState {
-	const deck = shuffle(buildDeck());
+export function createGame(
+	players: { id: string; name: string; skipTutorial?: boolean }[],
+	packs: readonly PackId[] = ["base"],
+): GameState {
+	const deck = shuffle(buildDeck(packs));
 	const order = shuffle(players.map((p) => p.id));
 
 	const game: GameState = {
 		players: {},
+		packs: [...packs],
+		deckSize: deck.length,
 		order,
 		turnIndex: 0,
+		turnNumber: 0,
 		deck,
 		discard: [],
-		phase: "draw",
+		phase: "tutorial",
 		drawnThisTurn: false,
 		challengeUsedThisTurn: false,
 		deckJustEmptied: false,
@@ -61,6 +72,11 @@ export function createGame(players: { id: string; name: string }[]): GameState {
 		started: true,
 		ended: false,
 		results: null,
+		startedAt: Date.now(),
+		events: [],
+		tutorial: Object.fromEntries(
+			players.map((p) => [p.id, p.skipTutorial ? 1 : 0]),
+		),
 	};
 
 	for (const p of players) {
@@ -73,15 +89,63 @@ export function createGame(players: { id: string; name: string }[]): GameState {
 		}
 	}
 
-	pushLog(
-		game,
-		`The flock has gathered. ${game.players[order[0]].name} goes first.`,
-	);
+	pushLog(game, "The flock has gathered.");
+	if (!tutorialPending(game)) beginFirstTurn(game);
 	return game;
 }
 
+function beginFirstTurn(game: GameState) {
+	game.phase = "draw";
+	pushLog(game, `${game.players[game.order[0]].name} goes first.`);
+	game.turnNumber = 1;
+}
+
+const MAX_EVENTS = 5000;
+
+export function recordEvent(
+	game: GameState,
+	type: GameEventType,
+	fields: { actor?: string; target?: string; data?: GameEventData } = {},
+) {
+	if (!game.events) game.events = [];
+	if (game.events.length >= MAX_EVENTS) return;
+	game.events.push({
+		t: game.startedAt ? Date.now() - game.startedAt : 0,
+		turn: game.turnNumber ?? 0,
+		type,
+		...fields,
+	});
+}
+
+export function recordReplacement(game: GameState, playerId: string) {
+	if (game.ended || !game.players[playerId]) return;
+	recordEvent(game, "player_replaced", { actor: playerId });
+}
+
+function fieldPoints(player: Player): number {
+	return player.field.reduce((sum, e) => sum + entityPoints(e), 0);
+}
+
+function sheepData(entity: SheepEntity): GameEventData {
+	return {
+		kind: entity.kind,
+		points: entityPoints(entity),
+		headColor: entity.head?.color ?? null,
+		buttColor: entity.butt?.color ?? null,
+		extraColor: entity.extra?.color ?? null,
+		rainbowParts: [entity.head, entity.butt, entity.extra].filter((c) => c?.rainbow).length,
+		modifier: entity.modifierCard?.modifier ?? null,
+	};
+}
+
 function pushLog(game: GameState, text: string) {
-	game.log.push({ ts: Date.now(), text });
+	const turn = game.turnNumber ?? 0;
+	game.log.push({
+		ts: Date.now(),
+		text,
+		turn,
+		playerId: turn > 0 ? currentPlayerId(game) : undefined,
+	});
 	if (game.log.length > 200) game.log.shift();
 }
 
@@ -89,8 +153,34 @@ export function currentPlayerId(game: GameState): string {
 	return game.order[game.turnIndex];
 }
 
+export function tutorialPending(game: GameState): boolean {
+	return !!game.tutorial && Object.values(game.tutorial).some((v) => v < 1);
+}
+
+// Progress only ever moves forward, so rewinding the video doesn't un-ready anyone.
+// The first turn begins as soon as the last player is ready.
+export function setTutorialProgress(
+	game: GameState,
+	playerId: string,
+	progress: number,
+) {
+	if (!game.tutorial || !(playerId in game.tutorial)) return;
+	const p = Math.min(1, Math.max(0, Number(progress) || 0));
+	game.tutorial[playerId] = Math.max(game.tutorial[playerId], p);
+	if (game.phase === "tutorial" && !tutorialPending(game)) beginFirstTurn(game);
+}
+
+function discardKind(card: Card): DiscardKind {
+	if (card.category === "action") return card.action;
+	if (card.category === "modifier") return card.modifier;
+	if (card.category === "head" || card.category === "butt") return card.category;
+	throw err("Challenge cards can’t be discarded until they’re used.");
+}
+
 function requireTurn(game: GameState, playerId: string) {
 	if (game.ended) throw err("The game has ended.");
+	if (game.phase === "tutorial")
+		throw err("Waiting for everyone to finish the tutorial.");
 	if (currentPlayerId(game) !== playerId) throw err("It's not your turn.");
 }
 
@@ -126,6 +216,10 @@ export function drawPhase(game: GameState, playerId: string) {
 	game.phase = "play";
 	game.drawnThisTurn = true;
 	game.challengeUsedThisTurn = false;
+	recordEvent(game, "draw", {
+		actor: playerId,
+		data: { cards: drew, deckLeft: game.deck.length, handSize: player.hand.length },
+	});
 	if (drew > 0) pushLog(game, `${player.name} drew a card.`);
 	else pushLog(game, `${player.name} skipped drawing (deck is empty).`);
 }
@@ -224,6 +318,7 @@ export function playSheep(
 			modifierCard,
 		};
 		player.field.push(entity);
+		recordEvent(game, "sheep_built", { actor: playerId, data: { ...sheepData(entity), source: "hand" } });
 		pushLog(game, `${player.name} built a ${describeSheep(entity)}!`);
 		return;
 	}
@@ -247,6 +342,7 @@ export function playSheep(
 			modifierCard,
 		};
 		player.field.push(entity);
+		recordEvent(game, "sheep_built", { actor: playerId, data: { ...sheepData(entity), source: "hand" } });
 		pushLog(game, `${player.name} painted a ${describeSheep(entity)}!`);
 		return;
 	}
@@ -273,6 +369,7 @@ export function playSheep(
 		modifierCard: null,
 	};
 	player.field.push(basicEntity);
+	recordEvent(game, "sheep_built", { actor: playerId, data: { ...sheepData(basicEntity), source: "hand" } });
 	pushLog(
 		game,
 		`${player.name} added a ${describeSheep(basicEntity)} to their field.`,
@@ -317,6 +414,11 @@ export function playAction(
 		player.field.push(sheep);
 		takeFromHand(player, cardId);
 		game.discard.push(card);
+		recordEvent(game, "action", {
+			actor: playerId,
+			target: targetPlayerId,
+			data: { action: "wheat", kind: sheep.kind, points: entityPoints(sheep) },
+		});
 		pushLog(
 			game,
 			`${player.name} lured ${target.name}'s ${describeSheep(sheep)} with Wheat!`,
@@ -332,6 +434,11 @@ export function playAction(
 		discardSheep(game, sheep);
 		takeFromHand(player, cardId);
 		game.discard.push(card);
+		recordEvent(game, "action", {
+			actor: playerId,
+			target: targetPlayerId,
+			data: { action: "wolf", kind: sheep.kind, points: entityPoints(sheep) },
+		});
 		pushLog(
 			game,
 			`${player.name} sent ${target.name}'s ${describeSheep(sheep)} packing with a Wolf!`,
@@ -344,6 +451,11 @@ export function playAction(
 		}
 		takeFromHand(player, cardId);
 		game.discard.push(card);
+		recordEvent(game, "action", {
+			actor: playerId,
+			target: targetPlayerId,
+			data: { action: "yoink", cards: n },
+		});
 		pushLog(
 			game,
 			`${player.name} yoinked ${n} card(s) from ${target.name}'s hand!`,
@@ -400,6 +512,7 @@ export function bodyswap(
 			);
 
 		const oldFrankenDesc = describeSheep(entity);
+		const fromKind = entity.kind;
 		takeFromHand(player, handCardId);
 		player.hand.push(removedPart);
 		if (entity.modifierCard) player.hand.push(entity.modifierCard);
@@ -409,6 +522,11 @@ export function bodyswap(
 		entity.butt = isHeads ? (handCard as ButtCard) : (keptPart as ButtCard);
 		entity.extra = null;
 		entity.modifierCard = null;
+		recordEvent(game, "bodyswap", {
+			actor: playerId,
+			target: targetPlayerId,
+			data: { fromKind, toKind: kind, ownSheep: targetPlayerId === playerId, points: entityPoints(entity) },
+		});
 		pushLog(
 			game,
 			`${player.name} BodySwapped ${target.name}'s ${oldFrankenDesc} into a ${describeSheep(entity)}!`,
@@ -445,6 +563,7 @@ export function bodyswap(
 			);
 
 		const oldSwapDesc = describeSheep(entity);
+		const fromKind = entity.kind;
 		takeFromHand(player, handCardId);
 		player.hand.push(removedPart);
 		if (entity.modifierCard) player.hand.push(entity.modifierCard);
@@ -453,6 +572,11 @@ export function bodyswap(
 		entity.head = newHead;
 		entity.butt = newButt;
 		entity.modifierCard = null;
+		recordEvent(game, "bodyswap", {
+			actor: playerId,
+			target: targetPlayerId,
+			data: { fromKind, toKind: kind, ownSheep: targetPlayerId === playerId, points: entityPoints(entity) },
+		});
 		pushLog(
 			game,
 			`${player.name} BodySwapped ${target.name}'s ${oldSwapDesc} into a ${describeSheep(entity)}!`,
@@ -495,6 +619,16 @@ export function playChallenge(
 		guess,
 		stage: "awaiting_flip",
 	};
+	recordEvent(game, "challenge_played", {
+		actor: playerId,
+		target: targetPlayerId,
+		data: {
+			challenge: card.challengeType,
+			guess,
+			challengerPoints: fieldPoints(player),
+			targetPoints: fieldPoints(target),
+		},
+	});
 	pushLog(
 		game,
 		`${player.name} used ${CHALLENGE_META[card.challengeType].name} against ${target.name}, guessing ${guess}!`,
@@ -519,6 +653,7 @@ export function playReflip(
 	player.hand.splice(idx, 1);
 	game.discard.push(card);
 
+	const previousWinner = pc.winnerId;
 	const flip: "heads" | "butts" = Math.random() < 0.5 ? "heads" : "butts";
 	const correct = flip === pc.guess!;
 	const winnerId = correct ? pc.challengerId : pc.targetId;
@@ -528,6 +663,21 @@ export function playReflip(
 	pc.winnerId = winnerId;
 	pc.loserId = loserId;
 	pc.flipCount = (pc.flipCount ?? 1) + 1;
+	recordEvent(game, "coin_flip", {
+		actor: pc.challengerId,
+		target: pc.targetId,
+		data: {
+			challenge: pc.challengeType,
+			guess: pc.guess,
+			flip,
+			challengerWon: correct,
+			flipNumber: pc.flipCount,
+			reflip: true,
+			reflipBy:
+				playerId === pc.challengerId ? "challenger" : playerId === pc.targetId ? "target" : "other",
+			reflipChangedOutcome: winnerId !== previousWinner,
+		},
+	});
 
 	pushLog(
 		game,
@@ -592,6 +742,18 @@ export function resolveFlip(game: GameState, playerId: string): FlipResult {
 	pc.winnerId = winnerId;
 	pc.loserId = loserId;
 	pc.flipCount = 1;
+	recordEvent(game, "coin_flip", {
+		actor: pc.challengerId,
+		target: pc.targetId,
+		data: {
+			challenge: pc.challengeType,
+			guess: pc.guess,
+			flip,
+			challengerWon: correct,
+			flipNumber: 1,
+			reflip: false,
+		},
+	});
 
 	return {
 		flip,
@@ -614,6 +776,18 @@ export function commitFlipResult(game: GameState) {
 		loser.hand = [];
 		game.discard.push(pc.card);
 		game.pendingChallenge = null;
+		recordEvent(game, "challenge_resolved", {
+			actor: winner.id,
+			target: loser.id,
+			data: {
+				challenge: "yoink_hand",
+				challengerWon: winner.id === pc.challengerId,
+				flips: pc.flipCount ?? 1,
+				count: cardCount,
+				points: 0,
+				recoveredKind: null,
+			},
+		});
 		pushLog(
 			game,
 			`${winner.name} yoinked all ${cardCount} card${cardCount !== 1 ? "s" : ""} from ${loser.name}'s hand!`,
@@ -720,6 +894,9 @@ export function resolveChallengeEffect(
 		throw err("Only the challenge winner chooses the effect.");
 	const winner = game.players[pc.winnerId!];
 	const loser = game.players[pc.loserId!];
+	let affected = 0;
+	let affectedPoints = 0;
+	let recoveredKind: string | null = null;
 
 	if (pc.challengeType === "lure2") {
 		const ids = (selections.sheepIds || []).slice(0, 2);
@@ -728,6 +905,8 @@ export function resolveChallengeEffect(
 			const sIdx = loser.field.findIndex((e) => e.id === sid);
 			if (sIdx === -1) continue;
 			const [sheep] = loser.field.splice(sIdx, 1);
+			affected++;
+			affectedPoints += entityPoints(sheep);
 			lureDescs.push(describeSheep(sheep));
 			winner.field.push(sheep);
 		}
@@ -746,6 +925,8 @@ export function resolveChallengeEffect(
 			const sIdx = loser.field.findIndex((e) => e.id === sid);
 			if (sIdx === -1) continue;
 			const [sheep] = loser.field.splice(sIdx, 1);
+			affected++;
+			affectedPoints += entityPoints(sheep);
 			removeDescs.push(describeSheep(sheep));
 			discardSheep(game, sheep);
 		}
@@ -764,6 +945,8 @@ export function resolveChallengeEffect(
 			const sIdx = loser.field.findIndex((e) => e.id === p.sheepId);
 			if (sIdx === -1) continue;
 			const [sheep] = loser.field.splice(sIdx, 1);
+			affected++;
+			affectedPoints += entityPoints(sheep);
 			halveDescs.push(describeSheep(sheep));
 			const parts = [sheep.head, sheep.butt, sheep.extra].filter(
 				(c): c is PartCard => !!c,
@@ -792,6 +975,13 @@ export function resolveChallengeEffect(
 		if (hasSelection) {
 			buildSheepFromDiscard(game, winner, selections);
 			const recovered = winner.field[winner.field.length - 1];
+			affected = 1;
+			affectedPoints = entityPoints(recovered);
+			recoveredKind = recovered.kind;
+			recordEvent(game, "sheep_built", {
+				actor: winner.id,
+				data: { ...sheepData(recovered), source: "discard" },
+			});
 			pushLog(
 				game,
 				`${winner.name} recovered a ${describeSheep(recovered)} from the discard pile!`,
@@ -801,33 +991,39 @@ export function resolveChallengeEffect(
 		}
 	}
 
+	recordEvent(game, "challenge_resolved", {
+		actor: winner.id,
+		target: loser.id,
+		data: {
+			challenge: pc.challengeType,
+			challengerWon: winner.id === pc.challengerId,
+			flips: pc.flipCount ?? 1,
+			count: affected,
+			points: affectedPoints,
+			recoveredKind,
+		},
+	});
 	game.discard.push(pc.card);
 	game.pendingChallenge = null;
 }
 
-export function discardCards(
-	game: GameState,
-	playerId: string,
-	cardIds: string[],
-) {
+// Ends the play phase so the player can pick cards to discard down to 7.
+// There's no way back to the play phase once this starts.
+export function startDiscard(game: GameState, playerId: string) {
 	requireTurn(game, playerId);
 	if (game.phase !== "play") throw err("Draw a card first.");
 	if (game.pendingChallenge)
 		throw err("Resolve the current challenge first.");
-	if (cardIds.length === 0) throw err("Choose at least one card to discard.");
-	const player = game.players[playerId];
-	for (const cid of cardIds) {
-		const idx = findCardInHand(player, cid);
-		const card = player.hand[idx];
-		if (card.category === "challenge")
-			throw err("Challenge cards can’t be discarded until they’re used.");
-		player.hand.splice(idx, 1);
-		game.discard.push(card);
-	}
-	pushLog(
-		game,
-		`${player.name} discarded ${cardIds.length} card${cardIds.length !== 1 ? "s" : ""}.`,
-	);
+	if (game.players[playerId].hand.length <= 7)
+		throw err("You only discard when holding more than 7 cards.");
+	game.phase = "discard";
+}
+
+// Back out of the discard step to keep playing - nothing has been discarded yet
+export function cancelDiscard(game: GameState, playerId: string) {
+	requireTurn(game, playerId);
+	if (game.phase !== "discard") throw err("You're not discarding.");
+	game.phase = "play";
 }
 
 export function endTurn(
@@ -836,28 +1032,58 @@ export function endTurn(
 	discardCardIds: string[] = [],
 ) {
 	requireTurn(game, playerId);
-	if (game.phase !== "play") throw err("Draw a card first.");
+	if (game.phase !== "play" && game.phase !== "discard")
+		throw err("Draw a card first.");
 	if (game.pendingChallenge)
 		throw err("Resolve the current challenge first.");
 	const player = game.players[playerId];
 
 	if (player.hand.length > 7) {
 		const wanted = player.hand.length - 7;
-		const ids = discardCardIds.slice(0, wanted);
-		if (ids.length < wanted)
+		const ids = discardCardIds;
+		if (ids.length !== wanted)
 			throw err(`Discard down to 7 cards (choose ${wanted}).`);
+		if (new Set(ids).size !== ids.length)
+			throw err("Pick different cards to discard.");
+		// Validate everything before touching the hand
 		for (const cid of ids) {
-			const idx = findCardInHand(player, cid);
-			const card = player.hand[idx];
+			const card = player.hand[findCardInHand(player, cid)];
 			if (card.category === "challenge")
 				throw err(
 					"Challenge cards can\u2019t be discarded until they\u2019re used.",
 				);
-			player.hand.splice(idx, 1);
-			game.discard.push(card);
 		}
+		const discarded: Record<DiscardKind, number> = Object.fromEntries(
+			DISCARD_KINDS.map((k) => [k, 0]),
+		) as Record<DiscardKind, number>;
+		for (const cid of ids) {
+			const [card] = player.hand.splice(findCardInHand(player, cid), 1);
+			game.discard.push(card);
+			discarded[discardKind(card)]++;
+			if ((card.category === "head" || card.category === "butt") && card.rainbow)
+				discarded.rainbow++;
+		}
+		recordEvent(game, "discard", {
+			actor: playerId,
+			data: { count: wanted, ...discarded },
+		});
+		pushLog(
+			game,
+			`${player.name} discarded ${wanted} card${wanted !== 1 ? "s" : ""}.`,
+		);
 	}
 
+	recordEvent(game, "turn_end", {
+		actor: playerId,
+		data: {
+			handSize: player.hand.length,
+			fieldSize: player.field.length,
+			fieldPoints: fieldPoints(player),
+			challengesInHand: player.hand.filter((c) => c.category === "challenge").length,
+			deckLeft: game.deck.length,
+			finalRound: game.finalRoundActive,
+		},
+	});
 	pushLog(game, `${player.name} said "Baa!"`);
 
 	if (game.deckJustEmptied && !game.finalRoundActive) {
@@ -868,6 +1094,7 @@ export function endTurn(
 		for (let i = 0; i < game.order.length; i++)
 			queue.push(game.order[(startIdx + i) % game.order.length]);
 		game.finalRoundQueue = queue;
+		recordEvent(game, "final_round", { actor: playerId });
 		pushLog(
 			game,
 			`The Draw Pile is empty! Final Round begins - everyone gets one more turn.`,
@@ -881,6 +1108,7 @@ export function endTurn(
 	}
 
 	game.turnIndex = (game.turnIndex + 1) % game.order.length;
+	game.turnNumber = (game.turnNumber ?? 0) + 1;
 	game.phase = "draw";
 	game.drawnThisTurn = false;
 	game.challengeUsedThisTurn = false;
@@ -888,6 +1116,7 @@ export function endTurn(
 
 function endGame(game: GameState) {
 	const scores: Record<string, number> = {};
+	const challengePenalties: Record<string, number> = {};
 	for (const pid of game.order) {
 		const p = game.players[pid];
 		let pts = p.field.reduce((sum, e) => sum + entityPoints(e), 0);
@@ -895,6 +1124,7 @@ function endGame(game: GameState) {
 			p.hand.filter((c) => c.category === "challenge").length * 3;
 		pts -= challengePenalty;
 		scores[pid] = pts;
+		challengePenalties[pid] = challengePenalty;
 	}
 	const best = Math.max(...Object.values(scores));
 	const tied = game.order.filter((pid) => scores[pid] === best);
@@ -906,7 +1136,17 @@ function endGame(game: GameState) {
 	}
 	game.ended = true;
 	game.phase = "ended";
-	game.results = { scores, winnerId, tied, wasTiebreak };
+	game.results = {
+		scores,
+		winnerId,
+		tied,
+		wasTiebreak,
+		challengePenalties,
+	};
+	recordEvent(game, "game_end", {
+		actor: winnerId,
+		data: { winningScore: scores[winnerId], tied: tied.length, wasTiebreak },
+	});
 	pushLog(
 		game,
 		`Game over! ${game.players[winnerId].name} wins with ${scores[winnerId]} point(s)${wasTiebreak ? " (won a tiebreak coin flip)" : ""}!`,

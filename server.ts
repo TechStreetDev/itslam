@@ -1,4 +1,4 @@
-import { createServer } from "http";
+import { createServer, IncomingMessage, ServerResponse } from "http";
 import next from "next";
 import { Server, Socket } from "socket.io";
 import * as engine from "./src/lib/engine";
@@ -6,6 +6,23 @@ import { lobbyManager, Lobby } from "./src/lib/lobbyManager";
 import * as bot from "./src/lib/bot";
 import { connectRedis } from "./src/lib/redis";
 import { saveLobby, deleteLobby as deleteFromRedis, loadAllLobbies } from "./src/lib/persistence";
+import {
+	authConfigured,
+	getSessionUser,
+	userAccess,
+	startLogin,
+	finishLogin,
+	logout,
+	activityLogin,
+	sessionFromToken,
+	SessionUser,
+} from "./src/lib/auth";
+import { collectStats, track } from "./src/lib/stats";
+import { connectDb } from "./src/lib/db";
+import { can, initRoles } from "./src/lib/roles";
+import { pruneLogins } from "./src/lib/logins";
+import { recordGame } from "./src/lib/gameRecorder";
+import { handleAdminApi, readJson, sendJson } from "./src/lib/adminApi";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = parseInt(process.env.PORT || "3000", 10);
@@ -13,14 +30,86 @@ const app = next({ dev });
 const handle = app.getRequestHandler();
 
 const BOT_DELAY_MS = 900;
-const REFLIP_WINDOW_MS = 6000;
+// The coin animation plays first, then players get the full window to play a Re-Flip
+const FLIP_ANIMATION_MS = 2000;
+const REFLIP_WINDOW_MS = 10000;
 const pendingBotActions = new Set<string>();
 const pendingReflipTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const pendingResetTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+// How long a player who drops mid-game has to reconnect before a bot takes over
+const RECONNECT_GRACE_MS = 10000;
+const pendingBotTakeovers = new Map<string, ReturnType<typeof setTimeout>>();
+
+// Discord Activity players are keyed by their Discord ID, so only that user's session may use it
+const ACTIVITY_PLAYER_PREFIX = "discord_";
+
+// Discord display names can hold anything - squeeze them into the lobby's name rules
+function activityName(username: string, lobby?: Lobby): string {
+	let base = username.replace(/[^a-zA-Z0-9 ]/g, "").replace(/\s+/g, " ").trim().slice(0, 19);
+	if (base.length < 3) base = "Shepherd";
+	const taken = new Set(lobby?.players.map((p) => p.name.toLowerCase()) ?? []);
+	let name = base;
+	for (let i = 2; taken.has(name.toLowerCase()); i++) {
+		const suffix = ` ${i}`;
+		name = base.slice(0, 19 - suffix.length) + suffix;
+	}
+	return name;
+}
+
 app.prepare().then(async () => {
-	const httpServer = createServer((req, res) => handle(req, res));
+	const httpServer = createServer((req, res) => {
+		const url = new URL(req.url || "/", "http://localhost");
+		if (url.pathname.startsWith("/auth/") || url.pathname.startsWith("/api/")) {
+			handleApi(req, res, url).catch((e) => {
+				console.error("API error:", e);
+				if (!res.headersSent) sendJson(res, 500, { error: "Internal error" });
+			});
+			return;
+		}
+		handle(req, res);
+	});
 	const io = new Server(httpServer);
+
+	async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
+		const user = getSessionUser(req);
+		switch (url.pathname) {
+			case "/auth/discord":
+				if (!authConfigured()) return sendJson(res, 503, { error: "Login is not configured" });
+				return startLogin(res);
+			case "/auth/discord/callback":
+				if (!authConfigured()) return sendJson(res, 503, { error: "Login is not configured" });
+				return finishLogin(req, res, url);
+			case "/auth/logout":
+				return logout(res);
+			case "/api/discord/token": {
+				if (req.method !== "POST") return sendJson(res, 405, { error: "Method not allowed" });
+				if (!authConfigured()) return sendJson(res, 503, { error: "Login is not configured" });
+				const { code } = await readJson(req);
+				if (typeof code !== "string" || !code) return sendJson(res, 400, { error: "Missing code" });
+				try {
+					return sendJson(res, 200, await activityLogin(code));
+				} catch (e) {
+					console.error("[Auth] Discord Activity login failed:", (e as Error).message);
+					return sendJson(res, 401, { error: "Discord sign-in failed" });
+				}
+			}
+			case "/api/me":
+				return sendJson(res, 200, {
+					loginEnabled: authConfigured(),
+					discordClientId: authConfigured() ? process.env.DISCORD_CLIENT_ID : null,
+					user: user && { ...user, ...userAccess(user) },
+				});
+			default:
+				if (
+					await handleAdminApi(req, res, url, user, () =>
+						collectStats(lobbyManager.getAllLobbies(), io.engine.clientsCount),
+					)
+				)
+					return;
+				return handle(req, res);
+		}
+	}
 
 	function resetLobbyGame(lobby: Lobby) {
 		pendingResetTimers.delete(lobby.code);
@@ -48,6 +137,15 @@ app.prepare().then(async () => {
 	}
 
 	function broadcast(lobby: Lobby) {
+		// Bot and flip timers can fire after their lobby was disbanded - don't revive it
+		if (lobbyManager.getLobby(lobby.code) !== lobby) return;
+		// A Discord Activity lobby is tied to its voice channel - once every human has
+		// left or been replaced by a bot, nobody can get back to it, so abandon the game
+		if (lobby.activityId && !lobby.players.some((p) => !p.isBot)) {
+			clearReflipTimer(lobby.code);
+			disbandLobbyAll(lobby);
+			return;
+		}
 		for (const p of lobby.players) {
 			if (p.socketId && !p.isBot) {
 				io.to(p.socketId).emit(
@@ -58,6 +156,8 @@ app.prepare().then(async () => {
 		}
 		scheduleBotAction(lobby);
 		if (lobby.game?.ended && !pendingResetTimers.has(lobby.code)) {
+			track("games_finished");
+			recordGame(lobby, "completed");
 			pendingResetTimers.set(
 				lobby.code,
 				setTimeout(() => resetLobbyGame(lobby), 12000),
@@ -76,6 +176,8 @@ app.prepare().then(async () => {
 
 	function startReflipTimer(lobby: Lobby) {
 		clearReflipTimer(lobby.code);
+		const delay = FLIP_ANIMATION_MS + REFLIP_WINDOW_MS;
+		if (lobby.game?.pendingChallenge) lobby.game.pendingChallenge.reflipDeadline = Date.now() + delay;
 		const t = setTimeout(() => {
 			pendingReflipTimers.delete(lobby.code);
 			if (!lobby.game) return;
@@ -85,14 +187,16 @@ app.prepare().then(async () => {
 			} catch (e) {
 				console.error("Reflip commit:", e);
 			}
-		}, REFLIP_WINDOW_MS);
+		}, delay);
 		pendingReflipTimers.set(lobby.code, t);
 	}
 
 	function scheduleBotAction(lobby: Lobby) {
 		if (!lobby.game || lobby.game.ended || lobby.game.phase === "ended")
 			return;
+		
 		if (pendingBotActions.has(lobby.code)) return;
+		if (lobby.game.phase === "tutorial") return;
 
 		const game = lobby.game;
 		const pc = game.pendingChallenge;
@@ -169,6 +273,10 @@ app.prepare().then(async () => {
 					} else {
 						broadcast(lobby); // Bot challenged a human; wait for them to flip
 					}
+				} else if (game.phase === "discard") {
+					// A bot that took over a human's seat mid-discard
+					bot.doBotEndTurn(game, currentId);
+					broadcast(lobby);
 				}
 			} catch (e) {
 				console.error("Bot action error:", e);
@@ -181,6 +289,9 @@ app.prepare().then(async () => {
 		const p = lobbyManager.findPlayer(lobby, playerId);
 		if (!p) return;
 		if (lobby.game && lobby.game.started && !lobby.game.ended) {
+			if (!p.isBot) engine.recordReplacement(lobby.game, playerId);
+			// A bot doesn't need the tutorial - don't hold the game up for it
+			engine.setTutorialProgress(lobby.game, playerId, 1);
 			p.connected = true;
 			p.isBot = true;
 			p.isReplacement = true;
@@ -189,6 +300,30 @@ app.prepare().then(async () => {
 			p.connected = false;
 			p.socketId = null;
 		}
+	}
+
+	function clearBotTakeover(playerId: string) {
+		const t = pendingBotTakeovers.get(playerId);
+		if (t) {
+			clearTimeout(t);
+			pendingBotTakeovers.delete(playerId);
+		}
+	}
+
+	function scheduleBotTakeover(lobby: Lobby, playerId: string) {
+		clearBotTakeover(playerId);
+		pendingBotTakeovers.set(
+			playerId,
+			setTimeout(() => {
+				pendingBotTakeovers.delete(playerId);
+				if (lobbyManager.getLobby(lobby.code) !== lobby) return;
+				const p = lobbyManager.findPlayer(lobby, playerId);
+				if (!p || p.connected || p.isBot) return;
+				if (!lobby.game?.started || lobby.game.ended) return;
+				replaceWithBot(lobby, playerId);
+				broadcast(lobby);
+			}, RECONNECT_GRACE_MS),
+		);
 	}
 
 	function disbandLobbyAll(lobby: Lobby) {
@@ -203,6 +338,11 @@ app.prepare().then(async () => {
 	}
 
 	connectRedis();
+	await connectDb();
+	await initRoles().catch((e) => console.error("[MySQL] loading roles failed:", e.message));
+	lobbyManager.onRemove = (lobby) => {
+		if (lobby.game?.started && !lobby.game.ended) recordGame(lobby, "abandoned");
+	};
 	const storedLobbies = await loadAllLobbies();
 	for (const lobby of storedLobbies) {
 		lobbyManager.loadLobby(lobby);
@@ -216,10 +356,23 @@ app.prepare().then(async () => {
 		console.log(`> Restored ${storedLobbies.length} lobby/lobbies from Redis`);
 
 	setInterval(() => lobbyManager.removeEmptyLobbies(), 60 * 1000).unref();
+	pruneLogins();
+	setInterval(pruneLogins, 6 * 60 * 60 * 1000).unref();
 
 	io.on("connection", (socket: Socket) => {
 		let currentCode: string | null = null;
 		let currentPlayerId: string | null = null;
+		// Web sockets carry the session cookie; Activity sockets pass the token on connect
+		const socketUser: SessionUser | null =
+			sessionFromToken(socket.handshake.auth?.token) ?? getSessionUser(socket.request);
+		const activityPlayerId = socketUser ? ACTIVITY_PLAYER_PREFIX + socketUser.id : null;
+
+		function checkPlayerId(playerId: unknown): string {
+			if (typeof playerId !== "string" || !playerId) throw new Error("Invalid player.");
+			if (playerId.startsWith(ACTIVITY_PLAYER_PREFIX) && playerId !== activityPlayerId)
+				throw new Error("Invalid player.");
+			return playerId;
+		}
 
 		function withLobby(cb: (lobby: Lobby) => void) {
 			try {
@@ -249,8 +402,10 @@ app.prepare().then(async () => {
 			"create_lobby",
 			({ playerId, name }: { playerId: string; name: string }) => {
 				try {
+					checkPlayerId(playerId);
 					const cleanName = validateName(name);
 					const lobby = lobbyManager.createLobby(playerId, cleanName);
+					track("lobbies_created");
 					currentCode = lobby.code;
 					currentPlayerId = playerId;
 					lobbyManager.findPlayer(lobby, playerId)!.socketId =
@@ -276,6 +431,9 @@ app.prepare().then(async () => {
 				code: string;
 			}) => {
 				try {
+					checkPlayerId(playerId);
+					if (lobbyManager.getLobby(code)?.activityId)
+						throw new Error("That lobby is a Discord Activity - join it from the channel.");
 					const cleanName = validateName(name);
 					const lobby = lobbyManager.joinLobby(
 						code,
@@ -284,6 +442,7 @@ app.prepare().then(async () => {
 					);
 					currentCode = lobby.code;
 					currentPlayerId = playerId;
+					clearBotTakeover(playerId);
 					const p = lobbyManager.findPlayer(lobby, playerId)!;
 					p.socketId = socket.id;
 					p.connected = true;
@@ -300,12 +459,14 @@ app.prepare().then(async () => {
 			"rejoin",
 			({ playerId, code }: { playerId: string; code: string }) => {
 				try {
+					checkPlayerId(playerId);
 					const lobby = lobbyManager.getLobby(code);
 					if (!lobby) throw new Error("That lobby no longer exists.");
 					const p = lobbyManager.findPlayer(lobby, playerId);
 					if (!p) throw new Error("You are not part of that lobby.");
 					currentCode = lobby.code;
 					currentPlayerId = playerId;
+					clearBotTakeover(playerId);
 					p.socketId = socket.id;
 					p.connected = true;
 					p.isBot = false;
@@ -319,8 +480,41 @@ app.prepare().then(async () => {
 			},
 		);
 
+		// Everyone in the same channel lands in the lobby for that Activity instance
+		socket.on("join_activity", ({ instanceId }: { instanceId: string }) => {
+			try {
+				if (!socketUser || !activityPlayerId)
+					throw new Error("Discord sign-in failed - try relaunching the Activity.");
+				if (typeof instanceId !== "string" || !instanceId || instanceId.length > 128)
+					throw new Error("Invalid Activity instance.");
+				let lobby = lobbyManager.findActivityLobby(instanceId);
+				if (!lobby) {
+					lobby = lobbyManager.createLobby(activityPlayerId, activityName(socketUser.username));
+					lobby.activityId = instanceId;
+					track("lobbies_created");
+				} else if (!lobbyManager.findPlayer(lobby, activityPlayerId)) {
+					lobbyManager.joinLobby(lobby.code, activityPlayerId, activityName(socketUser.username, lobby));
+				}
+				const p = lobbyManager.findPlayer(lobby, activityPlayerId)!;
+				currentCode = lobby.code;
+				currentPlayerId = activityPlayerId;
+				clearBotTakeover(activityPlayerId);
+				p.socketId = socket.id;
+				p.connected = true;
+				p.isBot = false;
+				p.isReplacement = false;
+				socket.join(lobby.code);
+				socket.emit("joined", { code: lobby.code, playerId: activityPlayerId });
+				broadcast(lobby);
+			} catch (e: any) {
+				socket.emit("error_msg", e.message);
+			}
+		});
+
 		socket.on("set_public", ({ isPublic }: { isPublic: boolean }) =>
 			withLobby((lobby) => {
+				if (lobby.activityId)
+					throw new Error("Discord Activity lobbies can't be made public.");
 				if (lobby.hostId !== currentPlayerId)
 					throw new Error(
 						"Only the host can change lobby visibility.",
@@ -329,6 +523,16 @@ app.prepare().then(async () => {
 				lobbyManager.setLobbyPublic(lobby, isPublic);
 				if (lobby.code !== oldCode) deleteFromRedis(oldCode);
 				currentCode = lobby.code; // code may have changed if made private
+			}),
+		);
+
+		socket.on("set_packs", ({ packs }: { packs: string[] }) =>
+			withLobby((lobby) => {
+				if (lobby.hostId !== currentPlayerId)
+					throw new Error("Only the host can change card packs.");
+				if (!Array.isArray(packs)) throw new Error("Invalid card packs.");
+				const playtester = can(socketUser, "hidden_packs");
+				lobbyManager.setLobbyPacks(lobby, packs, playtester);
 			}),
 		);
 
@@ -365,6 +569,18 @@ app.prepare().then(async () => {
 				if (lobby.hostId !== currentPlayerId)
 					throw new Error("Only the host can start the game.");
 				lobbyManager.startGame(lobby);
+				track("games_started");
+			}),
+		);
+
+		socket.on("tutorial_progress", ({ progress }: { progress: number }) =>
+			withLobby((lobby) => {
+				if (!lobby.game || !currentPlayerId) return;
+				engine.setTutorialProgress(lobby.game, currentPlayerId, progress);
+				if ((lobby.game.tutorial?.[currentPlayerId] ?? 1) >= 1) {
+					const p = lobbyManager.findPlayer(lobby, currentPlayerId);
+					if (p) p.tutorialSeen = true;
+				}
 			}),
 		);
 
@@ -436,13 +652,15 @@ app.prepare().then(async () => {
 				}),
 		);
 
-		socket.on("discard_cards", ({ cardIds }: { cardIds: string[] }) =>
+		socket.on("start_discard", () =>
 			withLobby((lobby) => {
-				engine.discardCards(
-					lobby.game!,
-					currentPlayerId!,
-					cardIds || [],
-				);
+				engine.startDiscard(lobby.game!, currentPlayerId!);
+			}),
+		);
+
+		socket.on("cancel_discard", () =>
+			withLobby((lobby) => {
+				engine.cancelDiscard(lobby.game!, currentPlayerId!);
 			}),
 		);
 
@@ -547,7 +765,8 @@ app.prepare().then(async () => {
 		socket.on("leave_lobby", () => {
 			if (!currentCode) return;
 			const lobby = lobbyManager.getLobby(currentCode);
-			if (lobby) {
+			if (lobby && currentPlayerId) {
+				clearBotTakeover(currentPlayerId);
 				if (lobby.game && lobby.game.started && !lobby.game.ended) {
 					// Mid-game - replace with bot as host passing/disbanding is deferred to game end
 					replaceWithBot(lobby, currentPlayerId);
@@ -555,10 +774,12 @@ app.prepare().then(async () => {
 				} else if (currentPlayerId === lobby.hostId && !lobbyManager.passHost(lobby)) {
 					disbandLobby(lobby);
 				} else {
-					replaceWithBot(lobby, currentPlayerId);
+					// Leaving on purpose outside a game - drop them so they can't hold up the next start
+					lobby.players = lobby.players.filter((p) => p.id !== currentPlayerId);
 					broadcast(lobby);
 				}
 			}
+			socket.leave(currentCode);
 			currentCode = null;
 			currentPlayerId = null;
 		});
@@ -566,17 +787,24 @@ app.prepare().then(async () => {
 		socket.on("disconnect", () => {
 			if (!currentCode) return;
 			const lobby = lobbyManager.getLobby(currentCode);
-			if (lobby) {
-				if (lobby.game && lobby.game.started && !lobby.game.ended) {
-					// Mid-game - replace with bot as host passing/disbanding is deferred to game end
-					replaceWithBot(lobby, currentPlayerId);
-					broadcast(lobby);
-				} else if (currentPlayerId === lobby.hostId && !lobbyManager.passHost(lobby)) {
-					disbandLobby(lobby);
-				} else {
-					replaceWithBot(lobby, currentPlayerId);
-					broadcast(lobby);
-				}
+			const p = lobby && lobbyManager.findPlayer(lobby, currentPlayerId);
+			// A refresh can rejoin on a new socket before this old one reports its disconnect
+			if (!lobby || !p || p.socketId !== socket.id) return;
+			if (lobby.game && lobby.game.started && !lobby.game.ended) {
+				// Mid-game - give them a moment to reconnect before a bot takes their seat
+				p.connected = false;
+				p.socketId = null;
+				scheduleBotTakeover(lobby, p.id);
+				broadcast(lobby);
+			} else if (currentPlayerId === lobby.hostId && !lobbyManager.passHost(lobby)) {
+				disbandLobby(lobby);
+			} else if (lobby.activityId) {
+				// Closing the Activity means leaving the channel game - don't leave an offline seat behind
+				lobby.players = lobby.players.filter((pl) => pl.id !== currentPlayerId);
+				broadcast(lobby);
+			} else {
+				replaceWithBot(lobby, currentPlayerId);
+				broadcast(lobby);
 			}
 		});
 	});

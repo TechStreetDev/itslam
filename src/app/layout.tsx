@@ -1,5 +1,10 @@
 import type { Metadata, Viewport } from "next";
+import { Baloo_2, Nunito } from "next/font/google";
 import "./globals.css";
+
+// Self-hosted at build time - Discord Activities block requests to Google Fonts
+const nunito = Nunito({ subsets: ["latin"], weight: ["400", "600", "700", "800"], variable: "--font-nunito" });
+const baloo = Baloo_2({ subsets: ["latin"], weight: ["500", "700", "800"], variable: "--font-baloo" });
 
 export const metadata: Metadata = {
 	title: "ITSLAM - Is That Sheep Looking At Me? Online",
@@ -42,7 +47,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({children}: {children: React.ReactNode}) {
 	return (
-		<html lang="en">
+		<html lang="en" className={`${nunito.variable} ${baloo.variable}`}>
 			<body>{children}</body>
 		</html>
 	);

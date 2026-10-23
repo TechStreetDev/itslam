@@ -1,6 +1,10 @@
 "use client";
 
-import { LobbyView } from "@/lib/types";
+import { useState } from "react";
+import { LobbyView, PackId } from "@/lib/types";
+import { PACKS } from "@/lib/deck";
+import { SiteFooter } from "@/components/SiteFooter";
+import { LobbySettingsModal } from "@/components/LobbySettingsModal";
 
 export function LobbyScreen({
 	state,
@@ -9,6 +13,7 @@ export function LobbyScreen({
 	onLeave,
 	onAddBot,
 	onSetPublic,
+	onSetPacks,
 	onKick,
 	isDev,
 }: {
@@ -18,21 +23,33 @@ export function LobbyScreen({
 	onLeave: () => void;
 	onAddBot: () => void;
 	onSetPublic: (isPublic: boolean) => void;
+	onSetPacks: (packs: PackId[]) => void;
 	onKick: (targetId: string) => void;
 	isDev?: boolean;
 }) {
 	const iAmHost = state.hostId === myId;
+	const [settingsOpen, setSettingsOpen] = useState(false);
 	const minPlayers = 2;
+	// Starting with someone offline would leave the game waiting on a player who isn't there
+	const offline = state.players.find((p) => !p.connected && !p.isBot);
 
 	return (
-		<section className="min-h-screen w-full flex items-center justify-center p-6">
+		<section className="min-h-screen w-full flex flex-col items-center justify-center p-6">
 			<div className="bg-[#fff0f5] rounded-[22px] shadow-[0_6px_18px_rgba(130,50,90,0.18)] p-8 max-w-[440px] w-full text-center">
-				<p className="uppercase tracking-wide font-extrabold text-[#8a5a70] text-xs">
-					Lobby code - share it with your flock
-				</p>
-				<div className="font-display text-5xl tracking-[0.2em] text-[#7a3a58] my-1.5 mb-[18px] font-extrabold">
-					{state.code}
-				</div>
+				{state.isActivity ? (
+					<p className="uppercase tracking-wide font-extrabold text-[#8a5a70] text-xs mb-[18px]">
+						Anyone in the voice channel can join this flock
+					</p>
+				) : (
+					<>
+						<p className="uppercase tracking-wide font-extrabold text-[#8a5a70] text-xs">
+							Lobby code - share it with your flock
+						</p>
+						<div className="font-display text-5xl tracking-[0.2em] text-[#7a3a58] my-1.5 mb-[18px] font-extrabold">
+							{state.code}
+						</div>
+					</>
+				)}
 
 				<ul className="flex flex-col gap-2 mb-[18px]">
 					{state.players.map((p) => (
@@ -74,7 +91,9 @@ export function LobbyScreen({
 					{iAmHost
 						? state.players.length < minPlayers
 							? `Need at least ${minPlayers} player${minPlayers > 1 ? "s" : ""} to start.`
-							: "Ready when you are!"
+							: offline
+								? `${offline.name} is offline - please wait for them to reconnect or kick them from the lobby.`
+								: "Ready when you are!"
 						: "Waiting for the host to start…"}
 				</p>
 
@@ -82,7 +101,7 @@ export function LobbyScreen({
 					<>
 						<button
 							onClick={onStart}
-							disabled={state.players.length < minPlayers}
+							disabled={state.players.length < minPlayers || !!offline}
 							className="w-full mb-2 font-extrabold text-[15px] px-5 py-3 rounded-full shadow bg-[#c05090] text-white disabled:opacity-50 hover:brightness-105 active:translate-y-px transition"
 						>
 							Start Game
@@ -95,20 +114,18 @@ export function LobbyScreen({
 								+ Add Bot
 							</button>
 						)}
-						<button
-							onClick={() => onSetPublic(!state.isPublic)}
-							className={`w-full mb-2.5 font-extrabold text-[14px] px-5 py-3 rounded-full border-2 transition ${
-								state.isPublic
-									? "bg-[#e8f5ee] text-[#2a6a40] border-[#a0d5b0] hover:brightness-95"
-									: "bg-[#f5f0ff] text-[#5a3a8a] border-[#c8b8e8] hover:brightness-95"
-							}`}
-						>
-							{state.isPublic
-								? "Public - visible in lobby browser"
-								: "Private - invite only"}
-						</button>
 					</>
 				)}
+				<button
+					onClick={() => setSettingsOpen(true)}
+					className="w-full mb-2.5 font-extrabold text-[14px] px-5 py-3 rounded-full border-2 bg-[#f5f0ff] text-[#5a3a8a] border-[#c8b8e8] hover:brightness-95 transition"
+				>
+					⚙ Lobby settings
+					<span className="block text-[11px] font-bold opacity-75">
+						{state.isActivity ? "Voice channel" : state.isPublic ? "Public" : "Private"} ·{" "}
+						{state.packs.map((id) => PACKS[id].name).join(" + ")}
+					</span>
+				</button>
 				<button
 					onClick={onLeave}
 					className="text-[#8a5a70] font-bold underline text-sm"
@@ -116,6 +133,16 @@ export function LobbyScreen({
 					Leave lobby
 				</button>
 			</div>
+			<SiteFooter />
+			{settingsOpen && (
+				<LobbySettingsModal
+					state={state}
+					canEdit={iAmHost}
+					onClose={() => setSettingsOpen(false)}
+					onSetPublic={onSetPublic}
+					onSetPacks={onSetPacks}
+				/>
+			)}
 		</section>
 	);
 }

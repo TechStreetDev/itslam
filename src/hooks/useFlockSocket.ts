@@ -1,14 +1,34 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
+	useSyncExternalStore,
+} from "react";
 import { io, Socket } from "socket.io-client";
-import { LobbiesPage, LobbyView } from "@/lib/types";
+import { LobbiesPage, LobbyView, PackId } from "@/lib/types";
+import {
+	getServerTabStatus,
+	getTabStatus,
+	subscribeTabStatus,
+	takeOverTab,
+} from "@/lib/tabLock";
+import {
+	ActivitySession,
+	isDiscordActivity,
+	startActivity,
+} from "@/lib/discordActivity";
 
 function uuid(): string {
 	return (
 		"p-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
 	);
 }
+
+// Whether we're inside a Discord Activity never changes after load
+const subscribeNever = () => () => {};
 
 export interface ToastItem {
 	id: number;
@@ -23,10 +43,32 @@ export function useFlockSocket() {
 	const [toasts, setToasts] = useState<ToastItem[]>([]);
 	const [landingError, setLandingError] = useState("");
 	const [connected, setConnected] = useState(false);
+	const [reconnecting, setReconnecting] = useState(false);
 	const myIdRef = useRef<string>("");
 	const savedCodeRef = useRef<string>("");
 	const toastCounter = useRef(0);
 	const lastLogTsRef = useRef<number>(-1);
+	const tabStatus = useSyncExternalStore(
+		subscribeTabStatus,
+		getTabStatus,
+		getServerTabStatus,
+	);
+	const activityMode = useSyncExternalStore(
+		subscribeNever,
+		isDiscordActivity,
+		() => false,
+	);
+	const [activity, setActivity] = useState<ActivitySession | null>(null);
+	const [activityError, setActivityError] = useState("");
+
+	useEffect(() => {
+		if (!activityMode) return;
+		startActivity()
+			.then(setActivity)
+			.catch((e) =>
+				setActivityError(e?.message || "Couldn't connect to Discord."),
+			);
+	}, [activityMode]);
 
 	const toast = useCallback((msg: string, error?: boolean) => {
 		const id = toastCounter.current++;
@@ -35,30 +77,51 @@ export function useFlockSocket() {
 	}, []);
 
 	useEffect(() => {
+		if (tabStatus !== "active") return;
+		// Activity players sign in through Discord first and are seated by the server
+		if (activityMode && !activity) return;
 		let myId = localStorage.getItem("flock_player_id");
 		if (!myId) {
 			myId = uuid();
 			localStorage.setItem("flock_player_id", myId);
 		}
 		myIdRef.current = myId;
-		savedCodeRef.current = localStorage.getItem("flock_code") || "";
+		savedCodeRef.current = activity
+			? ""
+			: localStorage.getItem("flock_code") || "";
 
-		const socket = io({ path: "/socket.io" });
+		const socket = io({
+			path: "/socket.io",
+			auth: activity ? { token: activity.token } : undefined,
+		});
 		socketRef.current = socket;
 
 		socket.on("connect", () => {
 			setConnected(true);
-			if (savedCodeRef.current) {
+			setReconnecting(false);
+			if (activity) {
+				socket.emit("join_activity", {
+					instanceId: activity.instanceId,
+				});
+			} else if (savedCodeRef.current) {
 				socket.emit("rejoin", {
 					playerId: myIdRef.current,
 					code: savedCodeRef.current,
 				});
 			}
 		});
-		socket.on("joined", ({ code }: { code: string }) => {
-			savedCodeRef.current = code;
-			localStorage.setItem("flock_code", code);
+		socket.on("disconnect", (reason) => {
+			// A deliberate client disconnect (unmount / tab takeover) won't retry.
+			if (reason !== "io client disconnect") setReconnecting(true);
 		});
+		socket.on(
+			"joined",
+			({ code, playerId }: { code: string; playerId: string }) => {
+				myIdRef.current = playerId;
+				savedCodeRef.current = code;
+				if (!activity) localStorage.setItem("flock_code", code);
+			},
+		);
 		socket.on("state", (s: LobbyView) => {
 			if (savedCodeRef.current && s.code !== savedCodeRef.current) {
 				savedCodeRef.current = s.code;
@@ -118,8 +181,13 @@ export function useFlockSocket() {
 
 		return () => {
 			socket.disconnect();
+			socketRef.current = null;
+			lastLogTsRef.current = -1;
+			setConnected(false);
+			setReconnecting(false);
+			setState(null);
 		};
-	}, [toast]);
+	}, [toast, tabStatus, activityMode, activity]);
 
 	const emit = useCallback((event: string, payload?: any) => {
 		socketRef.current?.emit(event, payload);
@@ -147,11 +215,19 @@ export function useFlockSocket() {
 		[emit],
 	);
 
+	const joinActivity = useCallback(() => {
+		if (!activity) return;
+		setLandingError("");
+		emit("join_activity", { instanceId: activity.instanceId });
+	}, [emit, activity]);
+
 	const leaveLobby = useCallback(() => {
 		emit("leave_lobby");
 		localStorage.removeItem("flock_code");
 		setState(null);
-	}, [emit]);
+		// The Activity has no landing page to fall back to - offer a way back in
+		if (activity) setLandingError("You left the voice channel game.");
+	}, [emit, activity]);
 
 	const listLobbies = useCallback(
 		(opts?: { search?: string; page?: number }) => {
@@ -174,9 +250,23 @@ export function useFlockSocket() {
 		[emit],
 	);
 
+	const setPacks = useCallback(
+		(packs: PackId[]) => {
+			emit("set_packs", { packs });
+		},
+		[emit],
+	);
+
 	return {
 		state,
 		connected,
+		reconnecting,
+		tabStatus,
+		takeOverTab,
+		activityMode,
+		activity,
+		activityError,
+		joinActivity,
 		myId: myIdRef.current,
 		toasts,
 		toast,
@@ -188,6 +278,7 @@ export function useFlockSocket() {
 		lobbiesPage,
 		listLobbies,
 		setPublic,
+		setPacks,
 		kickPlayer,
 	};
 }

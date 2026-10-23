@@ -166,7 +166,7 @@ export function doBotPlayAction(game: GameState, botId: string): boolean {
 }
 
 export function doBotEndTurn(game: GameState, botId: string): boolean {
-	if (game.phase !== "play" || engine.currentPlayerId(game) !== botId || game.pendingChallenge)
+	if ((game.phase !== "play" && game.phase !== "discard") || engine.currentPlayerId(game) !== botId || game.pendingChallenge)
 		return false;
 	const player = game.players[botId];
 	const discardIds =
