@@ -138,7 +138,7 @@ export function GameClient() {
 			)}
 
 			{activityMode && connected && !state && (
-				<section className="min-h-screen w-full flex items-center justify-center p-6">
+				<section className="min-h-dvh w-full flex items-center justify-center p-6">
 					{landingError ? (
 						<div className={panelClass}>
 							<h1 className="font-display text-2xl text-[#7a3a58] tracking-wide font-extrabold">

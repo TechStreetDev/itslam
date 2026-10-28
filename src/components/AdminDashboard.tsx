@@ -82,7 +82,7 @@ export function AdminDashboard() {
 	const canManage = permissions.includes("manage");
 
 	return (
-		<main className="min-h-screen w-full flex justify-center p-4 sm:p-6">
+		<main className="min-h-dvh w-full flex justify-center p-4 sm:p-6">
 			<div className="bg-[#fff0f5] rounded-[22px] shadow-[0_6px_18px_rgba(130,50,90,0.18)] p-4 sm:p-7 max-w-[1200px] w-full border-[3px] border-white self-start">
 				<div className="flex items-center justify-between gap-3">
 					<Link href="/" className="text-[#a06080] text-[12px] font-bold underline hover:text-[#c05090] transition">

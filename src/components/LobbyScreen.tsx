@@ -51,7 +51,7 @@ export function LobbyScreen({
 	const offline = state.players.find((p) => !p.connected && !p.isBot);
 
 	return (
-		<section className="min-h-screen w-full flex flex-col items-center justify-center p-6">
+		<section className="min-h-dvh w-full flex flex-col items-center justify-center p-6">
 			<div className="bg-[#fff0f5] rounded-[22px] shadow-[0_6px_18px_rgba(130,50,90,0.18)] p-8 max-w-[440px] w-full text-center">
 				{state.isActivity ? (
 					<p className="uppercase tracking-wide font-extrabold text-[#8a5a70] text-xs mb-[18px]">

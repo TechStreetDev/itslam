@@ -345,6 +345,7 @@ app.prepare().then(async () => {
 	};
 	const storedLobbies = await loadAllLobbies();
 	for (const lobby of storedLobbies) {
+		if (lobby.game) engine.repairSheepIds(lobby.game);
 		lobbyManager.loadLobby(lobby);
 		if (lobby.game && !lobby.game.ended) {
 			if (lobby.game.pendingChallenge?.stage === "awaiting_reflip")

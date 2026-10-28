@@ -51,6 +51,7 @@ button {
 
 html, body {
     min-height: 100vh;
+    min-height: 100dvh;
     font-family: var(--font-nunito), system-ui, sans-serif;
     color: var(--ink);
     background:
@@ -195,8 +196,71 @@ html, body {
     animation: modal-out 0.18s ease-in forwards;
 }
 
+/* Desktop action bar above the hand (GameScreen ActionBar) */
+/* Blows up from its centre like a bubble, wobbles, and pops away again */
+@keyframes action-bar-in {
+    0% {
+        transform: scale(0);
+    }
+    55% {
+        transform: scale(1.08);
+    }
+    75% {
+        transform: scale(0.97);
+    }
+    100% {
+        transform: scale(1);
+    }
+}
+
+@keyframes action-bar-out {
+    0% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    35% {
+        transform: scale(1.06);
+        opacity: 1;
+    }
+    100% {
+        transform: scale(0);
+        opacity: 0;
+    }
+}
+
+.action-bar-in,
+.action-bar-out {
+    transform-origin: center;
+}
+
+.action-bar-in {
+    animation: action-bar-in 0.24s ease-out;
+}
+
+.action-bar-out {
+    animation: action-bar-out 0.14s ease-in forwards;
+}
+
+/* Ghost sheep in your field (GameScreen GhostSheep) pops in the same way */
+.ghost-sheep {
+    animation: action-bar-in 0.24s ease-out;
+}
+
+.action-bar-text {
+    animation: drawer-fade 0.2s ease-out;
+}
+
 /* Keep the fade (Modal unmounts on animationend) but drop the movement */
 @media (prefers-reduced-motion: reduce) {
+    .action-bar-in,
+    .ghost-sheep {
+        animation: drawer-fade 0.2s ease-out;
+    }
+
+    .action-bar-out {
+        animation: drawer-fade-out 0.18s ease-in forwards;
+    }
+
     .modal-in {
         animation: drawer-fade 0.2s ease-out;
     }

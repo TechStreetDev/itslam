@@ -23,6 +23,7 @@ export function CardChip({
 	selected,
 	discardPick,
 	disabled,
+	grayed,
 	drawn,
 	onClick,
 }: {
@@ -31,9 +32,12 @@ export function CardChip({
 	selected?: boolean;
 	discardPick?: boolean;
 	disabled?: boolean;
+	// Shown but can't be picked right now (e.g. challenge cards while discarding)
+	grayed?: boolean;
 	drawn?: boolean;
 	onClick?: (c: Card) => void;
 }) {
+	if (grayed) disabled = true;
 	return (
 		<div
 			onClick={() => !disabled && onClick?.(card)}
@@ -42,9 +46,11 @@ export function CardChip({
 				mini
 					? "w-[46px] h-[64px] md:w-[54px] md:h-[76px]"
 					: "w-[74px] h-[104px] md:w-[90px] md:h-[126px] lg:w-[104px] lg:h-[146px] short:w-[74px] short:h-[104px]",
-				disabled
-					? "cursor-default brightness-65"
-					: "cursor-pointer",
+				grayed
+					? "cursor-not-allowed grayscale brightness-75 opacity-70"
+					: disabled
+						? "cursor-default brightness-65"
+						: "cursor-pointer",
 				selected
 					? "-translate-y-[18px] shadow-[0_0_0_4px_#b040a0,0_0_20px_rgba(176,64,160,0.65),0_10px_20px_rgba(0,0,0,0.35)]"
 					: [

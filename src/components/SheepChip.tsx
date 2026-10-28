@@ -83,12 +83,15 @@ export function SheepChip({
 	clickable,
 	swappable,
 	selected,
+	ghost,
 	onClick,
 }: {
 	entity: SheepEntity;
 	clickable?: boolean;
 	swappable?: boolean;
 	selected?: boolean;
+	// Preview of a sheep that isn't built yet - dashed and see-through
+	ghost?: boolean;
 	onClick?: (e: SheepEntity) => void;
 }) {
 	let leftCard: PartCard,
@@ -122,7 +125,7 @@ export function SheepChip({
 		: null;
 
 	const cardCls =
-		"w-[75px] h-[105px] rounded-[8px] object-contain bg-white shadow";
+		`w-[75px] h-[105px] rounded-[8px] object-contain bg-white shadow${ghost ? " opacity-45 transition group-hover:opacity-70" : ""}`;
 
 	return (
 		<div
@@ -150,7 +153,13 @@ export function SheepChip({
 				</div>
 			)}
 			{/* Box grouping every card that makes up this one sheep */}
-			<div className="flex gap-1 p-1.5 rounded-[14px] border-2 border-[#9a4f8c] bg-white/35 backdrop-blur-[2px]">
+			<div
+				className={
+					ghost
+						? "flex gap-1 p-1.5 rounded-[14px] border-2 border-dashed border-[#c05090] bg-white/25 transition group-hover:bg-white/45 group-hover:border-[#a03070]"
+						: "flex gap-1 p-1.5 rounded-[14px] border-2 border-[#9a4f8c] bg-white/35 backdrop-blur-[2px]"
+				}
+			>
 				<img
 					src={leftSrc}
 					alt=""

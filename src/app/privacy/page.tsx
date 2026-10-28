@@ -22,7 +22,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export default function PrivacyPage() {
 	return (
-		<main className="min-h-screen w-full flex items-center justify-center p-6">
+		<main className="min-h-dvh w-full flex items-center justify-center p-6">
 			<article className="bg-[#fff0f5] rounded-[22px] shadow-[0_6px_18px_rgba(130,50,90,0.18)] p-9 max-w-[640px] w-full border-[3px] border-white">
 				<Link
 					href="/"

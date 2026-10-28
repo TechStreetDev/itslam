@@ -104,7 +104,7 @@ export function LandingScreen({
 		: 1;
 
 	return (
-		<section className="min-h-screen w-full flex flex-col items-center justify-center p-6">
+		<section className="min-h-dvh w-full flex flex-col items-center justify-center p-6">
 			<div className="bg-[#fff0f5] rounded-[22px] shadow-[0_6px_18px_rgba(130,50,90,0.18)] p-9 max-w-[420px] w-full text-center border-[3px] border-white">
 				<div className="mb-4">
 					<h1 className="font-display text-4xl mt-1 text-[#7a3a58] tracking-wide font-extrabold">

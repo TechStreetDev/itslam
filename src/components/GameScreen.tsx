@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, LoaderCircle, Pin, PinOff, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Bot, Layers, LoaderCircle, Pin, PinOff, X } from "lucide-react";
 import {
 	ActionCard,
 	Card,
@@ -15,7 +15,7 @@ import {
 	SheepEntity,
 } from "@/lib/types";
 import { CHALLENGE_META, cardMeta, capitalize } from "@/lib/cardMeta";
-import { entityPoints } from "@/lib/engine";
+import { classifyPair, entityPoints } from "@/lib/engine";
 import { CardChip } from "./CardChip";
 import {
 	SheepChip,
@@ -537,6 +537,63 @@ export function GameScreen({
 		},
 	};
 
+	// A ready-to-build sheep, shown on desktop as a ghost in your field
+	// Built the same way as playSheep in engine.ts, so the preview matches the real sheep
+	const buildMove: {
+		entity: SheepEntity;
+		label: string;
+		play: () => void;
+	} | null =
+		move?.kind === "add_sheep_ready"
+			? {
+					entity: {
+						id: "ghost",
+						kind: classifyPair(move.head, move.butt) ?? "basic",
+						head: move.head,
+						butt: move.butt,
+						extra: null,
+						modifierCard: null,
+					},
+					label: "Add sheep",
+					play: () => moveBarProps.onAddSheep(move.head, move.butt),
+				}
+			: move?.kind === "franken_ready"
+				? {
+						entity: {
+							id: "ghost",
+							kind:
+								move.a.category === "head"
+									? "franken_heads"
+									: "franken_butts",
+							head: move.a.category === "head" ? move.a : null,
+							butt: move.a.category === "butt" ? move.a : null,
+							extra: move.b,
+							modifierCard: move.modifier,
+						},
+						label: "Add sheep",
+						play: () =>
+							moveBarProps.onFranken(move.a, move.b, move.modifier),
+					}
+				: move?.kind === "paint_ready"
+					? {
+							entity: {
+								id: "ghost",
+								kind: "painted",
+								head: move.head,
+								butt: move.butt,
+								extra: null,
+								modifierCard: move.modifier,
+							},
+							label: "Add sheep",
+							play: () =>
+								moveBarProps.onPaint(
+									move.head,
+									move.butt,
+									move.modifier,
+								),
+						}
+					: null;
+
 	const turnNotes = discardMode ? (
 		<>
 			<button
@@ -577,15 +634,19 @@ export function GameScreen({
 	);
 
 	return (
-		<div className="flex h-screen">
-			<section className="flex flex-col h-screen overflow-hidden flex-1 min-w-0">
+		<div className="flex h-dvh">
+			<section className="flex flex-col h-full overflow-hidden flex-1 min-w-0">
 				<header className="flex items-center justify-between gap-x-2 gap-y-1.5 px-4 py-2.5 bg-[#a05578] text-[#fff0f5] flex-wrap">
 					<div className="flex items-center gap-2.5">
 						<span className="font-display font-extrabold text-lg">
 							ITSLAM
 						</span>
-						<span className="bg-white/10 rounded-full px-2.5 py-1 text-sm font-bold">
-							&#127200; <b>{game.deckCount}</b>
+						<span
+							title="Cards left in the deck"
+							className="flex items-center gap-1.5 bg-white/10 rounded-full px-2.5 py-1 text-sm font-bold"
+						>
+							<Layers size={15} strokeWidth={2.5} />
+							<b className="tabular-nums">{game.deckCount}</b>
 						</span>
 					</div>
 					{/* Mobile: drops to its own full-width line under the logo and links */}
@@ -742,19 +803,40 @@ export function GameScreen({
 								{...sheepOptsFor(myId, entity)}
 							/>
 						))}
+						{/* Desktop: the selected cards ghosted into the field - click to place them */}
+						{myTurnPlayable && !pending && buildMove && (
+							<GhostSheep
+								key={[
+									buildMove.entity.head?.id,
+									buildMove.entity.butt?.id,
+									buildMove.entity.extra?.id,
+									buildMove.entity.modifierCard?.id,
+								].join()}
+								entity={buildMove.entity}
+								label={buildMove.label}
+								onClick={buildMove.play}
+							/>
+						)}
 						{me.field.length === 0 && (
-							<span className="opacity-55 font-bold">
+							<span
+								className={[
+									"opacity-55 font-bold",
+									myTurnPlayable && !pending && buildMove
+										? "md:hidden"
+										: "",
+								].join(" ")}
+							>
 								No sheep yet - play a Head + Butt card!
 							</span>
 						)}
 					</div>
 				</main>
 
-				<div className="hidden md:block">
-					<MoveBar {...moveBarProps} />
-				</div>
-
-				<div className="flex-shrink-0 hidden md:block">
+				<div className="flex-shrink-0 hidden md:block relative">
+					{/* Floats just above the hand (clear of raised cards) without pushing the layout around */}
+					<div className="absolute inset-x-0 bottom-full z-[35] flex justify-center px-4 mb-9 short:mb-7 pointer-events-none">
+						<ActionBar moveProps={moveBarProps} />
+					</div>
 					<CardFan
 						cards={orderedHand}
 						selected={selected}
@@ -779,7 +861,7 @@ export function GameScreen({
 				</div>
 
 				{/* Mobile: the hand lives in a drawer instead of the fan */}
-				<div className="md:hidden flex-shrink-0 flex items-center gap-2 px-3 py-2.5 bg-[#fff0f5]/85 backdrop-blur-sm border-t-2 border-white/80">
+				<div className="md:hidden flex-shrink-0 flex items-center gap-2 px-3 pt-2.5 pb-[max(10px,env(safe-area-inset-bottom))] bg-[#fff0f5]/85 backdrop-blur-sm border-t-2 border-white/80">
 					{pending ? (
 						<>
 							<div className="flex-1 font-bold text-sm text-[#7a3a58] leading-snug">
@@ -1009,7 +1091,7 @@ export function GameScreen({
 
 			{/* Desktop: the log docked as a column beside the game */}
 			{logDockedNow && (
-				<aside className="w-[300px] flex-shrink-0 h-screen bg-[#fff0f5] border-l-2 border-[#f5d0e8] flex flex-col">
+				<aside className="w-[300px] flex-shrink-0 h-full bg-[#fff0f5] border-l-2 border-[#f5d0e8] flex flex-col">
 					{logHeader(true)}
 					{logEntries}
 				</aside>
@@ -1433,6 +1515,10 @@ function CardFan({
 									}
 									discardPick={isDiscard}
 									disabled={disabled}
+									grayed={
+										discardMode &&
+										card.category === "challenge"
+									}
 									drawn={drawnIds.has(card.id)}
 									onClick={
 										discardMode ? onDiscardPick : onSelect
@@ -1450,16 +1536,16 @@ function CardFan({
 function pendingText(pending: Pending): string {
 	switch (pending.kind) {
 		case "await_wheat_sheep":
-			return "Click any opponent's Sheep to lure it to your field.";
+			return "Click any opponent's sheep to lure it to your field.";
 		case "await_wolf_sheep":
-			return "Click any opponent's Sheep to send it to the discard pile.";
+			return "Click any opponent's sheep to send it to the discard pile.";
 		case "await_yoink_opp":
 			return "Click an opponent to yoink 2 cards from.";
 		case "await_challenge_opp":
 			// Matches the end-of-game scoring in engine.ts
-			return `Click an opponent to challenge with ${cardMeta(pending.card).label}. If it's still in your hand when the game ends, it costs you 3 points.`;
+			return `Click an opponent to challenge with ${cardMeta(pending.card).label}.`;
 		case "await_bodyswap_target":
-			return "Click a highlighted Sheep to complete it with your card.";
+			return "Click a highlighted sheep to complete it with your card.";
 	}
 }
 
@@ -1767,6 +1853,9 @@ function HandGrid({
 								}
 								discardPick={isDiscard}
 								disabled={disabled}
+								grayed={
+									discardMode && card.category === "challenge"
+								}
 								drawn={drawnIds.has(card.id)}
 								onClick={discardMode ? onDiscardPick : onSelect}
 							/>
@@ -1792,7 +1881,7 @@ function HandGrid({
 	);
 }
 
-function MoveBar(props: {
+type MoveBarProps = {
 	pending: Pending | null;
 	onCancelPending: () => void;
 	myTurnPlayable: boolean;
@@ -1806,135 +1895,263 @@ function MoveBar(props: {
 		modifier: ModifierCard,
 	) => void;
 	onPaint: (head: HeadCard, butt: ButtCard, modifier: ModifierCard) => void;
-	// Sits in the flow (mobile hand drawer) instead of floating bottom-left
+	// Mobile hand drawer, where a lone Head/Butt may be half of a new sheep
 	inline?: boolean;
 	// Closes the drawer so a target on the board can be tapped
 	onPickTarget?: () => void;
-}) {
-	const panel = props.inline
-		? `mt-3 bg-white/70 border-2 border-[#e0609a] rounded-2xl px-4 py-3 flex flex-col gap-2`
-		: `fixed bottom-5 left-5 z-[40] bg-[#fff0f5] border-2 border-[#e0609a] rounded-2xl px-4 py-3 shadow-lg max-w-[260px] flex flex-col gap-2`;
-	const btn = (extra: string) =>
-		`font-extrabold text-sm px-4 py-2 rounded-full shadow active:translate-y-px transition ${extra}`;
+};
 
+const moveBtn =
+	"font-extrabold text-sm px-4 py-2 rounded-full shadow active:translate-y-px transition whitespace-nowrap bg-[#c05090] text-white";
+
+function ClearLink({ onClick }: { onClick: () => void }) {
+	return (
+		<button
+			onClick={onClick}
+			className="text-[#8a5a70] underline font-bold text-sm px-1"
+		>
+			Clear
+		</button>
+	);
+}
+
+// What the current selection / pending step says, and the buttons that go with it
+function moveContent(
+	props: MoveBarProps,
+): { text: React.ReactNode; actions: React.ReactNode } | null {
 	if (props.pending) {
 		// In the mobile drawer a lone Head/Butt might just be the first half of a
 		// new sheep, so the swap is offered rather than jumping straight to the board
 		const offerSwap =
 			props.inline && props.pending.kind === "await_bodyswap_target";
-		return (
-			<div className={panel}>
-				<div className="font-bold text-sm">
-					{offerSwap
-						? "Pick another card to build a sheep, or swap this one onto a sheep in play."
-						: pendingText(props.pending)}
-				</div>
-				<div className="flex gap-2 flex-wrap items-center">
+		return {
+			text: offerSwap
+				? "Pick another card to build a sheep, or swap this one onto a sheep in play."
+				: pendingText(props.pending),
+			actions: (
+				<>
+					<ClearLink onClick={props.onCancelPending} />
 					{offerSwap && props.onPickTarget && (
-						<button
-							onClick={props.onPickTarget}
-							className={btn("bg-[#c05090] text-white")}
-						>
+						<button onClick={props.onPickTarget} className={moveBtn}>
 							Choose a sheep
 						</button>
 					)}
-					<button
-						onClick={props.onCancelPending}
-						className="text-[#8a5a70] underline font-bold text-sm"
-					>
-						Clear
-					</button>
-				</div>
-			</div>
-		);
+				</>
+			),
+		};
 	}
 
 	if (!props.myTurnPlayable) return null;
 
 	const move = props.move;
-	let mainContent: React.ReactNode = null;
+	let text: React.ReactNode = null;
 	let actionBtn: React.ReactNode = null;
 
 	if (move?.kind === "hint") {
-		mainContent = <div className="font-bold text-sm">{move.text}</div>;
+		text = move.text;
 	} else if (move?.kind === "add_sheep_ready") {
-		mainContent = (
-			<div className="font-bold text-sm">
+		text = (
+			<>
 				Add a <b>{move.label}</b> to your field?
-			</div>
+			</>
 		);
 		actionBtn = (
 			<button
 				onClick={() => props.onAddSheep(move.head, move.butt)}
-				className={btn("bg-[#c05090] text-white")}
+				className={moveBtn}
 			>
 				Add Sheep
 			</button>
 		);
 	} else if (move?.kind === "franken_ready") {
-		mainContent = (
-			<div className="font-bold text-sm">
+		text = (
+			<>
 				Combine into a <b>{move.label}</b>?
-			</div>
+			</>
 		);
 		actionBtn = (
 			<button
 				onClick={() => props.onFranken(move.a, move.b, move.modifier)}
-				className={btn("bg-[#c05090] text-white")}
+				className={moveBtn}
 			>
 				Combine
 			</button>
 		);
 	} else if (move?.kind === "paint_ready") {
-		mainContent = (
-			<div className="font-bold text-sm">
+		text = (
+			<>
 				Add a <b>{move.label}</b> to your field?
-			</div>
+			</>
 		);
 		actionBtn = (
 			<button
 				onClick={() =>
 					props.onPaint(move.head, move.butt, move.modifier)
 				}
-				className={btn("bg-[#c05090] text-white")}
+				className={moveBtn}
 			>
 				Paint Sheep
 			</button>
 		);
 	} else if (move?.kind === "reflip_ready") {
-		mainContent = (
-			<div className="font-bold text-sm">
-				Keep this one! Whenever a challenge coin is flipped, you get a
-				few seconds to play Re-Flip and flip it again - a button will
-				pop up on the coin screen.
-			</div>
-		);
+		text =
+			"Keep this one! Play it right after a challenge coin flip to flip again.";
 	} else if (
 		move?.kind === "challenge_ready" &&
 		props.challengeUsedThisTurn
 	) {
-		mainContent = (
-			<div className="font-bold text-sm">
-				You already played a Challenge card this turn.
-			</div>
-		);
+		text = "You already played a Challenge card this turn.";
 	}
 
-	if (!mainContent) return null;
-
-	return (
-		<div className={panel}>
-			{mainContent}
-			<div className="flex gap-2 flex-wrap items-center">
+	if (!text) return null;
+	// Desktop builds by clicking the ghost sheep in the field instead of a button
+	if (actionBtn && !props.inline && move && "label" in move) {
+		text = (
+			<>
+				<b>{move.label}</b> - click the dotted sheep in your field to
+				place it
+			</>
+		);
+		actionBtn = null;
+	}
+	return {
+		text,
+		actions: (
+			<>
+				<ClearLink onClick={props.onClear} />
 				{actionBtn}
-				{(mainContent || actionBtn) && (
-					<button
-						onClick={props.onClear}
-						className="text-[#8a5a70] underline font-bold text-sm"
-					>
-						Clear
-					</button>
-				)}
+			</>
+		),
+	};
+}
+
+// Desktop: a dotted, see-through sheep in your field made from the selected
+// cards - clicking it builds the sheep (mobile uses the drawer's button instead)
+function GhostSheep({
+	entity,
+	label,
+	onClick,
+}: {
+	entity: SheepEntity;
+	label: string;
+	onClick: () => void;
+}) {
+	return (
+		<div
+			title={label}
+			className="ghost-sheep group relative flex-shrink-0 hidden md:block"
+		>
+			<SheepChip entity={entity} ghost clickable onClick={onClick} />
+			{/* Offset by SheepChip's top margin so it sits on the cards' centre */}
+			<div className="pointer-events-none absolute top-[calc(50%+7px)] left-1/2 -translate-x-1/2 -translate-y-1/2 bg-[#c05090]/70 backdrop-blur-[2px] text-white text-xs font-extrabold px-3 py-1 rounded-full shadow whitespace-nowrap transition group-hover:bg-[#c05090]/60 group-hover:scale-105">
+				+ {label}
+			</div>
+		</div>
+	);
+}
+
+// Mobile hand drawer version
+function MoveBar(props: MoveBarProps) {
+	const content = moveContent(props);
+	if (!content) return null;
+	return (
+		<div className="mt-3 bg-white/70 border-2 border-[#e0609a] rounded-2xl px-4 py-3 flex flex-col gap-2">
+			<div className="font-bold text-sm">{content.text}</div>
+			<div className="flex gap-2 flex-wrap items-center">
+				{content.actions}
+			</div>
+		</div>
+	);
+}
+
+// Desktop: pops up centred above the hand whenever the selection or a pending
+// step has something to say, and pops away again once it's done
+function ActionBar({ moveProps }: { moveProps: MoveBarProps }) {
+	const content = moveContent(moveProps);
+	const { mounted, closing, onAnimationEnd } = useExitAnimation(!!content);
+	// Keep showing the last message while the bar animates out
+	const lastContent = useRef(content);
+	if (content) lastContent.current = content;
+	const shown = content ?? lastContent.current;
+
+	// Width/height can't transition to `auto`, so the content is laid out at its
+	// natural size and the bubble animates between the measured sizes
+	const bubbleRef = useRef<HTMLDivElement>(null);
+	const innerRef = useRef<HTMLDivElement>(null);
+	const [size, setSize] = useState<{
+		w: number;
+		h: number;
+		maxW: number;
+	} | null>(null);
+	useLayoutEffect(() => {
+		if (!mounted) {
+			setSize(null);
+			return;
+		}
+		const inner = innerRef.current;
+		const wrap = bubbleRef.current?.parentElement;
+		if (!inner || !wrap) return;
+		function measure() {
+			const cs = getComputedStyle(wrap!);
+			const avail =
+				wrap!.clientWidth -
+				parseFloat(cs.paddingLeft) -
+				parseFloat(cs.paddingRight);
+			// +4 / -4 for the bubble's 2px border
+			setSize({
+				w: inner!.offsetWidth + 4,
+				h: inner!.offsetHeight + 4,
+				maxW: avail - 4,
+			});
+		}
+		measure();
+		const ro = new ResizeObserver(measure);
+		ro.observe(inner);
+		ro.observe(wrap);
+		return () => ro.disconnect();
+	}, [mounted]);
+
+	if (!mounted || !shown) return null;
+	return (
+		<div
+			ref={bubbleRef}
+			onAnimationEnd={onAnimationEnd}
+			style={
+				size
+					? {
+							width: size.w,
+							height: size.h,
+							transition:
+								"width 0.2s cubic-bezier(0.34, 1.4, 0.64, 1), height 0.2s cubic-bezier(0.34, 1.4, 0.64, 1)",
+						}
+					: undefined
+			}
+			className={[
+				// Centred so content overflowing mid-resize clips evenly on both sides
+				"action-bar bg-[#fff0f5] border-2 border-[#e0609a] rounded-[26px] shadow-lg overflow-hidden flex items-center justify-center",
+				closing
+					? "action-bar-out pointer-events-none"
+					: "action-bar-in pointer-events-auto",
+			].join(" ")}
+		>
+			<div
+				ref={innerRef}
+				style={size ? { maxWidth: size.maxW } : undefined}
+				// Just the message - deselecting cards in the hand clears it, and
+				// sheep are placed from the ghost in the field
+				className="w-max flex-shrink-0 flex items-center px-6 py-3"
+			>
+				{/* Re-keyed so a new message fades in when the selection changes */}
+				<div
+					key={
+						content
+							? String(moveProps.move?.kind ?? moveProps.pending?.kind)
+							: "closing"
+					}
+					className="action-bar-text font-bold text-sm text-[#7a3a58] leading-snug min-w-0 text-balance lg:whitespace-nowrap"
+				>
+					{shown.text}
+				</div>
 			</div>
 		</div>
 	);

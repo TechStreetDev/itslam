@@ -40,9 +40,22 @@ function err(msg: string): GameError {
 	return new GameError(msg);
 }
 
-let sheepIdCounter = 1;
+// Random rather than a counter: games are restored from Redis after a restart,
+// and a reset counter would hand out ids already on the board
 function nextSheepId(): string {
-	return "s" + sheepIdCounter++;
+	return "s-" + crypto.randomUUID();
+}
+
+// Games saved before ids were random can hold duplicate sheep ids, which makes
+// targeting (BodySwap, Wolf, Wheat...) hit the wrong sheep - give repeats new ids
+export function repairSheepIds(game: GameState) {
+	const seen = new Set<string>();
+	for (const p of Object.values(game.players)) {
+		for (const sheep of p.field) {
+			if (seen.has(sheep.id)) sheep.id = nextSheepId();
+			seen.add(sheep.id);
+		}
+	}
 }
 
 export function createGame(
@@ -224,7 +237,7 @@ export function drawPhase(game: GameState, playerId: string) {
 	else pushLog(game, `${player.name} skipped drawing (deck is empty).`);
 }
 
-function classifyPair(head: PartCard, butt: PartCard): SheepKind | null {
+export function classifyPair(head: PartCard, butt: PartCard): SheepKind | null {
 	if (head.rainbow && butt.rainbow) return "full_rainbow";
 	if (head.rainbow || butt.rainbow) return "half_rainbow";
 	if (head.color === butt.color) return "basic";
