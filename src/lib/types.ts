@@ -246,6 +246,7 @@ export interface LobbyView {
 	// Lobby tied to a Discord voice channel Activity - joined automatically, not by code
 	isActivity?: boolean;
 	packs: PackId[];
+	streamerMode: boolean;
 }
 
 export interface PublicLobbyEntry {

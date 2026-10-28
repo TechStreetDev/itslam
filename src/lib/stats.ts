@@ -77,6 +77,7 @@ export async function collectStats(lobbies: Lobby[], connectedSockets: number) {
 		lobbies: lobbies.map((l) => ({
 			code: l.code,
 			isPublic: l.isPublic,
+			source: l.activityId ? "discord" : "website",
 			packs: normalizePacks(l.packs),
 			players: l.players.length,
 			humansOnline: l.players.filter((p) => !p.isBot && p.connected).length,

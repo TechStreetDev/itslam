@@ -40,12 +40,14 @@ export function LobbySettingsModal({
 	onClose,
 	onSetPublic,
 	onSetPacks,
+	onSetStreamerMode,
 }: {
 	state: LobbyView;
 	canEdit: boolean;
 	onClose: () => void;
 	onSetPublic: (isPublic: boolean) => void;
 	onSetPacks: (packs: PackId[]) => void;
+	onSetStreamerMode: (enabled: boolean) => void;
 }) {
 	const [canUseHidden, setCanUseHidden] = useState(false);
 	useEffect(() => {
@@ -107,7 +109,7 @@ export function LobbySettingsModal({
 						<h3 className="uppercase tracking-wide font-extrabold text-[#8a5a70] text-xs mb-2">
 							Visibility
 						</h3>
-						<div className="bg-white rounded-xl px-4 py-3 border-2 border-[#f5d0e8] flex items-center justify-between gap-3 mb-5">
+						<div className="bg-white rounded-xl px-4 py-3 border-2 border-[#f5d0e8] flex items-center justify-between gap-3 mb-2">
 							<div>
 								<div className="font-bold text-[#5a3048]">Public lobby</div>
 								<div className="text-[12px] font-semibold text-[#9a7888]">
@@ -120,6 +122,21 @@ export function LobbySettingsModal({
 								disabled={!canEdit}
 								onChange={() => onSetPublic(!state.isPublic)}
 								label="Public lobby"
+							/>
+						</div>
+						<div className="bg-white rounded-xl px-4 py-3 border-2 border-[#f5d0e8] flex items-center justify-between gap-3 mb-5">
+							<div>
+								<div className="font-bold text-[#5a3048]">Streamer mode</div>
+								<div className="text-[12px] font-semibold text-[#9a7888]">
+									Blur the lobby code on everyone's screen. Players can
+									still click it to copy.
+								</div>
+							</div>
+							<Toggle
+								on={state.streamerMode}
+								disabled={!canEdit}
+								onChange={() => onSetStreamerMode(!state.streamerMode)}
+								label="Streamer mode"
 							/>
 						</div>
 					</>

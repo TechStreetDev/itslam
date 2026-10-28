@@ -57,6 +57,7 @@ export async function recordGame(lobby: Lobby, status: "completed" | "abandoned"
 				bot_count: game.order.length - humans.length,
 				replaced_count: humans.filter(wasReplaced).length,
 				is_public: lobby.isPublic,
+				source: lobby.activityId ? "discord" : "website",
 				packs: normalizePacks(game.packs).join(","),
 				deck_size: game.deckSize ?? null,
 				turns: game.turnNumber ?? 0,
@@ -77,8 +78,8 @@ export async function recordGame(lobby: Lobby, status: "completed" | "abandoned"
 				event_count: events.length,
 			},
 		);
+		
 		const gameId = (res as { insertId: number }).insertId;
-
 		const playerRows = game.order.map((id, s) => {
 			const p = game.players[id];
 			const fieldPts = p.field.reduce((sum, e) => sum + entityPoints(e), 0);

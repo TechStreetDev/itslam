@@ -44,6 +44,8 @@ export function GameClient() {
 		listLobbies,
 		setPublic,
 		setPacks,
+		setStreamerMode,
+		regenerateCode,
 		kickPlayer,
 	} = useFlockSocket();
 
@@ -175,6 +177,8 @@ export function GameClient() {
 					isDev={process.env.NODE_ENV === "development"}
 					onSetPublic={setPublic}
 					onSetPacks={setPacks}
+					onSetStreamerMode={setStreamerMode}
+					onRegenerateCode={regenerateCode}
 					onKick={kickPlayer}
 				/>
 			)}

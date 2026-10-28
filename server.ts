@@ -526,6 +526,37 @@ app.prepare().then(async () => {
 			}),
 		);
 
+		socket.on("set_streamer_mode", ({ enabled }: { enabled: boolean }) =>
+			withLobby((lobby) => {
+				if (lobby.hostId !== currentPlayerId) {
+					throw new Error("Only the host can change streamer mode.");
+				}
+				
+				lobby.streamerMode = !!enabled;
+			}),
+		);
+
+		socket.on("regenerate_code", () =>
+			withLobby((lobby) => {
+				if (lobby.activityId) {
+					throw new Error("Discord Activity lobbies don't use a code.");
+				}
+
+				if (lobby.hostId !== currentPlayerId) {
+					throw new Error("Only the host can change the lobby code.");
+				}
+
+				if (lobby.game) {
+					throw new Error("Cannot change the lobby code during a game.");
+				}
+
+				const oldCode = lobby.code;
+				lobbyManager.regenerateCode(lobby);
+				deleteFromRedis(oldCode);
+				currentCode = lobby.code;
+			}),
+		);
+
 		socket.on("set_packs", ({ packs }: { packs: string[] }) =>
 			withLobby((lobby) => {
 				if (lobby.hostId !== currentPlayerId)

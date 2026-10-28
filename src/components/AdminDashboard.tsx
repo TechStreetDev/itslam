@@ -230,7 +230,7 @@ function LiveTab() {
 					<table className="w-full text-[13px] text-left">
 						<thead className="text-[11px] uppercase tracking-wide text-[#8a5a70]">
 							<tr>
-								{["Code", "Status", "Visibility", "Card packs", "Players", "Opened"].map((h) => (
+								{["Code", "Status", "Source", "Visibility", "Card packs", "Players", "Opened"].map((h) => (
 									<th key={h} className="px-3 py-2 font-extrabold">
 										{h}
 									</th>
@@ -242,6 +242,7 @@ function LiveTab() {
 								<tr key={l.code} className="border-t border-[#f5d0e8]">
 									<td className="px-3 py-2 font-extrabold tracking-widest">{l.code}</td>
 									<td className="px-3 py-2 capitalize">{l.status}</td>
+									<td className="px-3 py-2">{l.source === "discord" ? "Discord" : "Website"}</td>
 									<td className="px-3 py-2">{l.isPublic ? "Public" : "Private"}</td>
 									<td className="px-3 py-2 whitespace-nowrap">{packsLabel(l.packs)}</td>
 									<td className="px-3 py-2 tabular-nums">

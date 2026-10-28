@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { LobbyView, PackId } from "@/lib/types";
 import { PACKS } from "@/lib/deck";
 import { SiteFooter } from "@/components/SiteFooter";
@@ -14,6 +15,8 @@ export function LobbyScreen({
 	onAddBot,
 	onSetPublic,
 	onSetPacks,
+	onSetStreamerMode,
+	onRegenerateCode,
 	onKick,
 	isDev,
 }: {
@@ -24,11 +27,27 @@ export function LobbyScreen({
 	onAddBot: () => void;
 	onSetPublic: (isPublic: boolean) => void;
 	onSetPacks: (packs: PackId[]) => void;
+	onSetStreamerMode: (enabled: boolean) => void;
+	onRegenerateCode: () => void;
 	onKick: (targetId: string) => void;
 	isDev?: boolean;
 }) {
 	const iAmHost = state.hostId === myId;
 	const [settingsOpen, setSettingsOpen] = useState(false);
+	const [copied, setCopied] = useState(false);
+	const copiedTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+	useEffect(() => () => clearTimeout(copiedTimer.current), []);
+
+	const copyCode = () => {
+		navigator.clipboard
+			.writeText(state.code)
+			.then(() => {
+				setCopied(true);
+				clearTimeout(copiedTimer.current);
+				copiedTimer.current = setTimeout(() => setCopied(false), 1800);
+			})
+			.catch(() => {});
+	};
 	const minPlayers = 2;
 	// Starting with someone offline would leave the game waiting on a player who isn't there
 	const offline = state.players.find((p) => !p.connected && !p.isBot);
@@ -43,10 +62,34 @@ export function LobbyScreen({
 				) : (
 					<>
 						<p className="uppercase tracking-wide font-extrabold text-[#8a5a70] text-xs">
-							Lobby code - share it with your flock
+							{copied ? "Copied to clipboard!" : "Lobby code - click to copy"}
 						</p>
-						<div className="font-display text-5xl tracking-[0.2em] text-[#7a3a58] my-1.5 mb-[18px] font-extrabold">
-							{state.code}
+						<div className="flex items-center justify-center gap-2 my-1.5 mb-[18px]">
+							<button
+								onClick={copyCode}
+								title="Copy lobby code"
+								aria-label={state.streamerMode ? "Copy hidden lobby code" : `Copy lobby code ${state.code}`}
+								className="font-display text-5xl text-[#7a3a58] font-extrabold rounded-xl px-2 hover:bg-[#ffe0f0] transition"
+							>
+								{/* Fixed-width cells so every code is the same width - the display font is proportional */}
+								<span className={`flex gap-[0.15em] ${state.streamerMode ? "blur-md select-none" : ""}`}>
+									{state.code.split("").map((ch, i) => (
+										<span key={i} className="inline-block w-[0.85em] text-center">
+											{ch}
+										</span>
+									))}
+								</span>
+							</button>
+							{iAmHost && (
+								<button
+									onClick={onRegenerateCode}
+									title="Generate a new lobby code"
+									aria-label="Generate a new lobby code"
+									className="text-[#c05090] border-2 border-[#f5d0e8] rounded-full w-9 h-9 flex items-center justify-center shrink-0 hover:bg-[#ffe0f0] hover:border-[#c05090] transition"
+								>
+									<RefreshCw size={16} strokeWidth={3} />
+								</button>
+							)}
 						</div>
 					</>
 				)}
@@ -123,6 +166,7 @@ export function LobbyScreen({
 					⚙ Lobby settings
 					<span className="block text-[11px] font-bold opacity-75">
 						{state.isActivity ? "Voice channel" : state.isPublic ? "Public" : "Private"} ·{" "}
+						{state.streamerMode ? "Streamer mode · " : ""}
 						{state.packs.map((id) => PACKS[id].name).join(" + ")}
 					</span>
 				</button>
@@ -141,6 +185,7 @@ export function LobbyScreen({
 					onClose={() => setSettingsOpen(false)}
 					onSetPublic={onSetPublic}
 					onSetPacks={onSetPacks}
+					onSetStreamerMode={onSetStreamerMode}
 				/>
 			)}
 		</section>

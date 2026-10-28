@@ -32,6 +32,7 @@ const SORTS = [
 	{ value: "highest_score", label: "Highest score" },
 ] as const;
 
+const sourceLabel = (s: string | null) => (s === "discord" ? "Discord" : s === "website" ? "Website" : "Unknown");
 const fmtDate = (s: string) => new Date(s).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 export function GamesTab({ filters, canManage }: { filters: Filters; canManage: boolean }) {
@@ -75,7 +76,7 @@ export function GamesTab({ filters, canManage }: { filters: Filters; canManage: 
 					<table className="w-full text-[13px] text-left">
 						<thead className="text-[11px] uppercase tracking-wide text-[#8a5a70]">
 							<tr>
-								{["#", "Started", "Status", "Players", "Packs", "Duration", "Turns", "Winner", "Score", "Challenges"].map((h) => (
+								{["#", "Started", "Status", "Source", "Players", "Packs", "Duration", "Turns", "Winner", "Score", "Challenges"].map((h) => (
 									<th key={h} className="px-3 py-2 font-extrabold whitespace-nowrap">
 										{h}
 									</th>
@@ -92,6 +93,7 @@ export function GamesTab({ filters, canManage }: { filters: Filters; canManage: 
 									<td className="px-3 py-2 text-[#8a5a70]">{g.id}</td>
 									<td className="px-3 py-2 whitespace-nowrap">{fmtDate(g.started_at)}</td>
 									<td className="px-3 py-2 capitalize">{g.status}</td>
+									<td className="px-3 py-2">{sourceLabel(g.source)}</td>
 									<td className="px-3 py-2 whitespace-nowrap">
 										{g.player_count}
 										{n(g.bot_count) > 0 && <span className="text-[#9a7888]"> ({g.bot_count} bot)</span>}
@@ -227,7 +229,7 @@ function GameDetail({
 				Game #{g.id} <span className="text-[13px] text-[#8a5a70] capitalize">· {g.status}</span>
 			</h2>
 			<p className="text-[12px] text-[#8a5a70] font-semibold mb-3">
-				{fmtDate(g.started_at)} → {fmtDate(g.ended_at)} · {g.is_public ? "Public" : "Private"} lobby · {packsLabel(g.packs)}
+				{fmtDate(g.started_at)} → {fmtDate(g.ended_at)} · {sourceLabel(g.source)} · {g.is_public ? "Public" : "Private"} lobby · {packsLabel(g.packs)}
 				{g.deck_size !== null && ` (${g.deck_size} cards)`}
 			</p>
 			<StatGrid>

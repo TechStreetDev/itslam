@@ -32,6 +32,8 @@ export interface Lobby {
 	packs?: PackId[];
 	// Discord Activity instance this lobby belongs to - everyone in that voice channel shares it
 	activityId?: string;
+	// Blurs the lobby code on everyone's screen so it can't leak on a stream
+	streamerMode?: boolean;
 }
 
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -156,14 +158,16 @@ export class LobbyManager {
 		return lobby.players.find((p) => p.id === playerId);
 	}
 
+	// Clients notice the new code in their next state update and rejoin under it
+	regenerateCode(lobby: Lobby): void {
+		const newCode = this.genCode();
+		this.lobbies.delete(lobby.code);
+		lobby.code = newCode;
+		this.lobbies.set(newCode, lobby);
+	}
+
 	setLobbyPublic(lobby: Lobby, isPublic: boolean): void {
-		if (!isPublic && lobby.isPublic) {
-			const newCode = this.genCode();
-			this.lobbies.delete(lobby.code);
-			lobby.code = newCode;
-			this.lobbies.set(newCode, lobby);
-		}
-		
+		if (!isPublic && lobby.isPublic) this.regenerateCode(lobby);
 		lobby.isPublic = isPublic;
 	}
 
@@ -246,6 +250,7 @@ export class LobbyManager {
 				isPublic: lobby.isPublic,
 				isActivity: !!lobby.activityId,
 				packs: normalizePacks(lobby.packs),
+				streamerMode: !!lobby.streamerMode,
 			};
 		}
 
@@ -306,6 +311,7 @@ export class LobbyManager {
 			isPublic: lobby.isPublic,
 			isActivity: !!lobby.activityId,
 			packs: normalizePacks(lobby.packs),
+			streamerMode: !!lobby.streamerMode,
 		};
 	}
 }

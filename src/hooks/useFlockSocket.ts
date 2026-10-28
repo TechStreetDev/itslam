@@ -257,6 +257,16 @@ export function useFlockSocket() {
 		[emit],
 	);
 
+	const setStreamerMode = useCallback(
+		(enabled: boolean) => {
+			emit("set_streamer_mode", { enabled });
+		}, [emit],
+	);
+
+	const regenerateCode = useCallback(() => {
+		emit("regenerate_code");
+	}, [emit]);
+
 	return {
 		state,
 		connected,
@@ -279,6 +289,8 @@ export function useFlockSocket() {
 		listLobbies,
 		setPublic,
 		setPacks,
+		setStreamerMode,
+		regenerateCode,
 		kickPlayer,
 	};
 }

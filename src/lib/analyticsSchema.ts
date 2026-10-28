@@ -123,6 +123,7 @@ export const GAME_COLUMNS: FieldDef[] = [
 	{ key: "bot_count", label: "Bots", kind: "cat" },
 	{ key: "replaced_count", label: "Humans replaced by bots", kind: "cat" },
 	{ key: "is_public", label: "Public lobby", kind: "bool" },
+	{ key: "source", label: "Source (website / discord)", kind: "cat" },
 	{ key: "final_round_reached", label: "Final round reached", kind: "bool" },
 	{ key: "winner_seat", label: "Winner seat (0 = first)", kind: "cat" },
 	{ key: "winner_is_bot", label: "Winner is bot", kind: "bool" },
