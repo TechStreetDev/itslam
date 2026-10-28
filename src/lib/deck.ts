@@ -120,7 +120,7 @@ export const PACKS: Record<PackId, CardPack> = {
 	base: {
 		id: "base",
 		name: "Base Game",
-		description: "The original ITSLAM game.",
+		description: "The cards from the original ITSLAM game.",
 		alwaysOn: true,
 		cards: [
 			...COLORS.flatMap((color) => sheepParts(color)),

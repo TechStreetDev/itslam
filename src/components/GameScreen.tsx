@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Bot, Layers, LoaderCircle, Pin, PinOff, X } from "lucide-react";
+import { Bot, Hand, Layers, LoaderCircle, Pin, PinOff, X } from "lucide-react";
 import {
 	ActionCard,
 	Card,
@@ -641,13 +641,16 @@ export function GameScreen({
 						<span className="font-display font-extrabold text-lg">
 							ITSLAM
 						</span>
-						<span
-							title="Cards left in the deck"
-							className="flex items-center gap-1.5 bg-white/10 rounded-full px-2.5 py-1 text-sm font-bold"
-						>
-							<Layers size={15} strokeWidth={2.5} />
-							<b className="tabular-nums">{game.deckCount}</b>
-						</span>
+						<HeaderStat
+							icon={<Layers size={15} strokeWidth={2.5} />}
+							value={game.deckCount}
+							label="Cards left in the deck"
+						/>
+						<HeaderStat
+							icon={<Hand size={15} strokeWidth={2.5} />}
+							value={myHand.length}
+							label="Cards in your hand"
+						/>
 					</div>
 					{/* Mobile: drops to its own full-width line under the logo and links */}
 					<div className="order-last basis-full flex justify-center min-w-0 md:order-none md:basis-auto md:flex-1">
@@ -885,7 +888,7 @@ export function GameScreen({
 										: "bg-white text-[#7a3a58]",
 								].join(" ")}
 							>
-								<HandStackPreview count={myHand.length} />
+								<HandStackPreview count={myHand.length} active={myTurnPlayable || discardMode} />
 								<span className="truncate">
 									{discardMode
 										? `Discard ${discardNeed}`
@@ -1549,21 +1552,57 @@ function pendingText(pending: Pending): string {
 	}
 }
 
-// Mini fanned card backs for the mobile "open hand" button
-function HandStackPreview({ count }: { count: number }) {
-	const shown = Math.min(count, 3);
+// Header count pill with a label that shows on hover, or on tap (focus) for touch screens
+function HeaderStat({
+	icon,
+	value,
+	label,
+}: {
+	icon: React.ReactNode;
+	value: number;
+	label: string;
+}) {
 	return (
-		<span className="relative w-[34px] h-[26px] flex-shrink-0">
-			{Array.from({ length: shown }).map((_, i) => (
-				<span
-					key={i}
-					className="absolute bottom-0 left-1/2 w-[15px] h-[22px] rounded-[3px] bg-[#f5b8d4] border border-white shadow-sm"
-					style={{
-						transformOrigin: "bottom center",
-						transform: `translateX(calc(-50% + ${(i - (shown - 1) / 2) * 7}px)) rotate(${(i - (shown - 1) / 2) * 12}deg)`,
-					}}
-				/>
-			))}
+		<button
+			type="button"
+			aria-label={`${label}: ${value}`}
+			className="group relative flex items-center gap-1.5 bg-white/10 rounded-full px-2.5 py-1 text-sm font-bold cursor-default outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+		>
+			{icon}
+			<b className="tabular-nums">{value}</b>
+			<span
+				role="tooltip"
+				className="pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-1.5 z-50 whitespace-nowrap rounded-lg bg-[#3d1a2c] text-white text-xs font-bold px-2.5 py-1 shadow-lg opacity-0 scale-95 transition group-hover:opacity-100 group-hover:scale-100 group-focus:opacity-100 group-focus:scale-100"
+			>
+				{label}
+			</span>
+		</button>
+	);
+}
+
+// Mini fanned card backs for the mobile "open hand" button
+function HandStackPreview({ count, active }: { count: number; active?: boolean }) {
+	// Always draw at least one card so the icon never disappears with an empty hand
+	const shown = Math.max(1, Math.min(count, 3));
+	return (
+		<span className="relative block w-[34px] h-[26px] flex-shrink-0">
+			{Array.from({ length: shown }).map((_, i) => {
+				const offset = i - (shown - 1) / 2;
+				return (
+					<span
+						key={i}
+						className={`absolute bottom-0 block w-[15px] h-[22px] rounded-[3px] border-[1.5px] shadow-sm ${
+							active ? "bg-white border-[#f5b8d4]" : "bg-[#e48ab4] border-white"
+						} ${count === 0 ? "opacity-40" : ""}`}
+						style={{
+							// Plain px positioning - calc() inside transforms didn't paint reliably in some webviews
+							left: 17 - 7.5 + offset * 7,
+							transformOrigin: "bottom center",
+							transform: `rotate(${offset * 12}deg)`,
+						}}
+					/>
+				);
+			})}
 			<span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#7a3a58] text-white text-[10px] font-black flex items-center justify-center tabular-nums">
 				{count}
 			</span>

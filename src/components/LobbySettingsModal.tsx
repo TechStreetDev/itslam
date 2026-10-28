@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Star } from "lucide-react";
+import { Lock, Star } from "lucide-react";
 import { LobbyView, MAX_PLAYERS, PackId } from "@/lib/types";
 import { PACKS, PACK_ORDER, packCardCount } from "@/lib/deck";
 import { authHeaders } from "@/lib/discordActivity";
@@ -26,11 +26,20 @@ function Toggle({
 			aria-label={label}
 			disabled={disabled}
 			onClick={onChange}
-			className={`relative shrink-0 w-12 h-7 rounded-full transition ${on ? "bg-[#c05090]" : "bg-[#d8c0cc]"} disabled:opacity-60 disabled:cursor-not-allowed`}
+			title={disabled ? "Locked" : undefined}
+			className={`relative shrink-0 w-12 h-7 rounded-full transition ${
+				disabled
+					? `cursor-not-allowed ${on ? "bg-[#b5a8ae]" : "bg-[#e2dadd]"}`
+					: on
+						? "bg-[#c05090]"
+						: "bg-[#d8c0cc]"
+			}`}
 		>
 			<span
-				className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white shadow transition-transform ${on ? "translate-x-5" : ""}`}
-			/>
+				className={`absolute top-1 left-1 w-5 h-5 rounded-full shadow transition-transform flex items-center justify-center ${disabled ? "bg-[#f3eff1]" : "bg-white"} ${on ? "translate-x-5" : ""}`}
+			>
+				{disabled && <Lock size={11} strokeWidth={3} className="text-[#9a8f94]" />}
+			</span>
 		</button>
 	);
 }
@@ -202,7 +211,12 @@ export function LobbySettingsModal({
 									<span className="text-[11px] font-extrabold text-[#9a7888] bg-[#f5d0e8] rounded-full px-2 py-0.5">
 										{count} card{count === 1 ? "" : "s"}
 									</span>
-									
+									{pack.alwaysOn && (
+										<span className="text-[11px] font-extrabold text-[#8a7f84] bg-[#ece6e9] rounded-full px-2 py-0.5 flex items-center gap-1">
+											<Lock size={10} strokeWidth={3} />
+											Always on
+										</span>
+									)}
 									{pack.hidden && (
 										<span
 											title="Playtest pack - only playtesters can see this"
