@@ -18,7 +18,6 @@ export function LobbyScreen({
 	onSetStreamerMode,
 	onRegenerateCode,
 	onKick,
-	isDev,
 }: {
 	state: LobbyView;
 	myId: string;
@@ -30,7 +29,6 @@ export function LobbyScreen({
 	onSetStreamerMode: (enabled: boolean) => void;
 	onRegenerateCode: () => void;
 	onKick: (targetId: string) => void;
-	isDev?: boolean;
 }) {
 	const iAmHost = state.hostId === myId;
 	const [settingsOpen, setSettingsOpen] = useState(false);
@@ -141,24 +139,15 @@ export function LobbyScreen({
 				</p>
 
 				{iAmHost && (
-					<>
-						<button
-							onClick={onStart}
-							disabled={state.players.length < minPlayers || !!offline}
-							className="w-full mb-2 font-extrabold text-[15px] px-5 py-3 rounded-full shadow bg-[#c05090] text-white disabled:opacity-50 hover:brightness-105 active:translate-y-px transition"
-						>
-							Start Game
-						</button>
-						{isDev && state.players.length < 4 && (
-							<button
-								onClick={onAddBot}
-								className="w-full mb-2 font-extrabold text-[15px] px-5 py-3 rounded-full shadow bg-[#9a7888] text-white hover:brightness-105 active:translate-y-px transition"
-							>
-								+ Add Bot
-							</button>
-						)}
-					</>
+					<button
+						onClick={onStart}
+						disabled={state.players.length < minPlayers || !!offline}
+						className="w-full mb-2 font-extrabold text-[15px] px-5 py-3 rounded-full shadow bg-[#c05090] text-white disabled:opacity-50 hover:brightness-105 active:translate-y-px transition"
+					>
+						Start Game
+					</button>
 				)}
+				
 				<button
 					onClick={() => setSettingsOpen(true)}
 					className="w-full mb-2.5 font-extrabold text-[14px] px-5 py-3 rounded-full border-2 bg-[#f5f0ff] text-[#5a3a8a] border-[#c8b8e8] hover:brightness-95 transition"
@@ -186,6 +175,7 @@ export function LobbyScreen({
 				onSetPublic={onSetPublic}
 				onSetPacks={onSetPacks}
 				onSetStreamerMode={onSetStreamerMode}
+				onAddBot={onAddBot}
 			/>
 		</section>
 	);

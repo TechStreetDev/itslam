@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Star } from "lucide-react";
-import { LobbyView, PackId } from "@/lib/types";
+import { LobbyView, MAX_PLAYERS, PackId } from "@/lib/types";
 import { PACKS, PACK_ORDER, packCardCount } from "@/lib/deck";
 import { authHeaders } from "@/lib/discordActivity";
 import { Modal } from "@/components/Modal";
@@ -43,6 +43,7 @@ export function LobbySettingsModal({
 	onSetPublic,
 	onSetPacks,
 	onSetStreamerMode,
+	onAddBot,
 }: {
 	open: boolean;
 	state: LobbyView;
@@ -51,14 +52,18 @@ export function LobbySettingsModal({
 	onSetPublic: (isPublic: boolean) => void;
 	onSetPacks: (packs: PackId[]) => void;
 	onSetStreamerMode: (enabled: boolean) => void;
+	onAddBot: () => void;
 }) {
-	const [canUseHidden, setCanUseHidden] = useState(false);
+	const lobbyFull = state.players.length >= MAX_PLAYERS;
+	const [permissions, setPermissions] = useState<string[]>([]);
 	useEffect(() => {
 		fetch("/api/me", { headers: authHeaders() })
 			.then((r) => r.json())
-			.then((me) => setCanUseHidden(!!me.user?.permissions?.includes("hidden_packs")))
+			.then((me) => setPermissions(me.user?.permissions ?? []))
 			.catch(() => {});
 	}, []);
+	const canUseHidden = permissions.includes("hidden_packs");
+	const canAddBot = canEdit && permissions.includes("add_bots");
 
 	useEffect(() => {
 		if (!open) return;
@@ -142,7 +147,42 @@ export function LobbySettingsModal({
 					</div>
 				</>
 			)}
-			
+
+			{canAddBot && (
+				<>
+					<h3 className="uppercase tracking-wide font-extrabold text-[#8a5a70] text-xs mb-2">
+						Players
+					</h3>
+					<div className="bg-white rounded-xl px-4 py-3 border-2 border-[#f5d0e8] flex items-center justify-between gap-3 mb-5">
+						<div>
+							<div className="font-bold text-[#5a3048] flex items-center gap-1.5">
+								Bots
+								<span
+									title="Playtester feature - only playtesters can see this"
+									aria-label="Playtester feature"
+									className="text-[#f0c419] bg-[#fff4c2] rounded-full p-1"
+								>
+									<Star size={12} fill="currentColor" />
+								</span>
+							</div>
+							<div className="text-[12px] font-semibold text-[#9a7888]">
+								{lobbyFull
+									? `The lobby is full (${MAX_PLAYERS} players max).`
+									: "Fill an empty seat with a computer player."}
+							</div>
+						</div>
+						<button
+							type="button"
+							onClick={onAddBot}
+							disabled={lobbyFull}
+							className="shrink-0 h-7 px-3 rounded-full bg-[#c05090] text-white text-[13px] font-extrabold hover:brightness-105 active:translate-y-px transition disabled:opacity-60 disabled:cursor-not-allowed"
+						>
+							+ Add
+						</button>
+					</div>
+				</>
+			)}
+
 			<h3 className="uppercase tracking-wide font-extrabold text-[#8a5a70] text-xs mb-2">
 				Card packs
 			</h3>

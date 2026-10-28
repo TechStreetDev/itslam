@@ -531,7 +531,7 @@ app.prepare().then(async () => {
 				if (lobby.hostId !== currentPlayerId) {
 					throw new Error("Only the host can change streamer mode.");
 				}
-				
+
 				lobby.streamerMode = !!enabled;
 			}),
 		);
@@ -733,15 +733,21 @@ app.prepare().then(async () => {
 			}),
 		);
 
-		if (dev) {
-			socket.on("add_bot", () =>
-				withLobby((lobby) => {
-					if (lobby.hostId !== currentPlayerId)
-						throw new Error("Only the host can add a bot.");
-					lobbyManager.addBot(lobby);
-				}),
-			);
+		socket.on("add_bot", () =>
+			withLobby((lobby) => {
+				if (!can(socketUser, "add_bots")) {
+					throw new Error("Only playtesters can add bots.");
+				}
 
+				if (lobby.hostId !== currentPlayerId) {
+					throw new Error("Only the host can add a bot.");
+				}
+				
+				lobbyManager.addBot(lobby);
+			}),
+		);
+
+		if (dev) {
 			socket.on("dev_give_card", (spec: any) =>
 				withLobby((lobby) => {
 					if (!lobby.game || !currentPlayerId) return;

@@ -6,14 +6,15 @@ export type Role = (typeof ROLES)[number];
 
 export type Permission =
 	| "hidden_packs" // switch on card packs marked hidden in deck.ts
+	| "add_bots" // add bot players to lobbies they host
 	| "view_stats" // open /admin and see statistics
 	| "manage"; // delete games, use the explorer, manage roles
 
 export const ROLE_META: Record<Role, { label: string; desc: string; permissions: Permission[] }> = {
 	playtester: {
 		label: "Playtester",
-		desc: "Can use hidden card packs in their lobbies.",
-		permissions: ["hidden_packs"],
+		desc: "Can use hidden card packs and add bots in their lobbies.",
+		permissions: ["hidden_packs", "add_bots"],
 	},
 	viewer: {
 		label: "Viewer",
