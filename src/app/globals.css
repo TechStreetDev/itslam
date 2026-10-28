@@ -164,6 +164,48 @@ html, body {
     animation: drawer-fade-out 0.22s ease-in forwards;
 }
 
+/* Centered dialogs (Modal.tsx) - backdrop uses drawer-fade / drawer-fade-out */
+@keyframes modal-in {
+    from {
+        opacity: 0;
+        transform: translateY(12px) scale(0.94);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@keyframes modal-out {
+    from {
+        opacity: 1;
+        transform: none;
+    }
+    to {
+        opacity: 0;
+        transform: translateY(8px) scale(0.96);
+    }
+}
+
+.modal-in {
+    animation: modal-in 0.26s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+.modal-out {
+    animation: modal-out 0.18s ease-in forwards;
+}
+
+/* Keep the fade (Modal unmounts on animationend) but drop the movement */
+@media (prefers-reduced-motion: reduce) {
+    .modal-in {
+        animation: drawer-fade 0.2s ease-out;
+    }
+
+    .modal-out {
+        animation: drawer-fade-out 0.18s ease-in forwards;
+    }
+}
+
 /* Side panels (log) */
 @keyframes panel-in-right {
     from {

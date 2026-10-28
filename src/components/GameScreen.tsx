@@ -25,6 +25,8 @@ import {
 } from "./SheepChip";
 import { ChallengeOverlay } from "./ChallengeOverlay";
 import { ResultsOverlay } from "./ResultsOverlay";
+import { Modal } from "./Modal";
+import { useExitAnimation } from "@/hooks/useExitAnimation";
 import { DevPanel } from "./DevPanel";
 import { TutorialVideo } from "./TutorialVideo";
 
@@ -58,6 +60,9 @@ type Move =
 	| { kind: "reflip_ready"; card: ActionCard }
 	| { kind: "challenge_ready"; card: ChallengeCard }
 	| { kind: "bodyswap_ready"; card: HeadCard | ButtCard };
+
+const modalPanel =
+	"bg-[#fff0f5] rounded-[22px] p-7 max-w-[480px] w-full text-center shadow-2xl";
 
 export function GameScreen({
 	state,
@@ -856,9 +861,9 @@ export function GameScreen({
 					)}
 				</HandDrawer>
 
-				{guessTarget && (
-					<div className="fixed inset-0 bg-[rgba(0,0,0,0.55)] flex items-center justify-center z-50 p-5">
-						<div className="bg-[#fff0f5] rounded-[22px] p-7 max-w-[480px] w-full text-center shadow-2xl">
+				<Modal open={!!guessTarget} panelClassName={modalPanel}>
+					{guessTarget && (
+						<>
 							<h2 className="font-display text-2xl text-[#7a3a58] mt-0 mb-2">
 								Is that sheep looking at you?
 							</h2>
@@ -889,30 +894,45 @@ export function GameScreen({
 							>
 								Cancel
 							</button>
-						</div>
-					</div>
-				)}
+						</>
+					)}
+				</Modal>
 
-				{game.pendingChallenge && (
-					<ChallengeOverlay
-						game={game}
-						myId={myId}
-						myHand={myHand}
-						emit={emit}
-					/>
-				)}
-				{resultsShown && (
-					<ResultsOverlay
-						game={game}
-						results={game.results!}
-						onBack={onBackToMenu}
-					/>
-				)}
+				<Modal
+					open={!!game.pendingChallenge}
+					panelClassName={`${modalPanel} max-h-[86vh] overflow-y-auto`}
+				>
+					{game.pendingChallenge && (
+						<ChallengeOverlay
+							game={game}
+							myId={myId}
+							myHand={myHand}
+							emit={emit}
+						/>
+					)}
+				</Modal>
+				<Modal
+					open={!!resultsShown}
+					panelClassName={`${modalPanel} max-h-[86vh] overflow-y-auto`}
+				>
+					{resultsShown && (
+						<ResultsOverlay
+							game={game}
+							results={game.results!}
+							onBack={onBackToMenu}
+						/>
+					)}
+				</Modal>
 				{isDev && devOpen && <DevPanel emit={emit} />}
 
-				{firstTimeOpen && (
-					<div className="fixed inset-0 bg-[rgba(0,0,0,0.6)] flex items-center justify-center z-[70] p-4">
-						<div className="bg-[#fff0f5] rounded-[22px] p-6 max-w-[820px] w-full text-center shadow-2xl">
+				<Modal
+					open={firstTimeOpen}
+					backdropClassName="bg-[rgba(0,0,0,0.6)]"
+					className="z-[70] p-4"
+					panelClassName="bg-[#fff0f5] rounded-[22px] p-6 max-w-[820px] w-full text-center shadow-2xl"
+				>
+					{firstTimeOpen && (
+						<>
 							<div className="text-3xl mb-2">&#128017;</div>
 							<h2 className="font-display text-2xl text-[#7a3a58] mt-0 mb-1">
 								First time playing?
@@ -938,40 +958,40 @@ export function GameScreen({
 							>
 								Skip - I know how to play
 							</button>
-						</div>
-					</div>
-				)}
+						</>
+					)}
+				</Modal>
 
-				{endGameConfirm && (
-					<div className="fixed inset-0 bg-[rgba(0,0,0,0.55)] flex items-center justify-center z-[70] p-5">
-						<div className="bg-[#fff0f5] rounded-[22px] p-7 max-w-[380px] w-full text-center shadow-2xl">
-							<h2 className="font-display text-2xl text-[#7a3a58] mt-0 mb-2">
-								End the game?
-							</h2>
-							<p className="text-[#8a5a70] font-semibold mb-5">
-								This will return everyone to the lobby. The
-								current game state will be lost.
-							</p>
-							<div className="flex gap-2.5 justify-center">
-								<button
-									onClick={() => {
-										emit("abort_game");
-										setEndGameConfirm(false);
-									}}
-									className="font-extrabold text-sm px-5 py-3 rounded-full shadow bg-[#c03060] text-white active:translate-y-px"
-								>
-									End game
-								</button>
-								<button
-									onClick={() => setEndGameConfirm(false)}
-									className="font-extrabold text-sm px-5 py-3 rounded-full shadow bg-[#f0d0e5] text-[#7a3a58] active:translate-y-px"
-								>
-									Cancel
-								</button>
-							</div>
-						</div>
+				<Modal
+					open={endGameConfirm}
+					className="z-[70] p-5"
+					panelClassName="bg-[#fff0f5] rounded-[22px] p-7 max-w-[380px] w-full text-center shadow-2xl"
+				>
+					<h2 className="font-display text-2xl text-[#7a3a58] mt-0 mb-2">
+						End the game?
+					</h2>
+					<p className="text-[#8a5a70] font-semibold mb-5">
+						This will return everyone to the lobby. The
+						current game state will be lost.
+					</p>
+					<div className="flex gap-2.5 justify-center">
+						<button
+							onClick={() => {
+								emit("abort_game");
+								setEndGameConfirm(false);
+							}}
+							className="font-extrabold text-sm px-5 py-3 rounded-full shadow bg-[#c03060] text-white active:translate-y-px"
+						>
+							End game
+						</button>
+						<button
+							onClick={() => setEndGameConfirm(false)}
+							className="font-extrabold text-sm px-5 py-3 rounded-full shadow bg-[#f0d0e5] text-[#7a3a58] active:translate-y-px"
+						>
+							Cancel
+						</button>
 					</div>
-				)}
+				</Modal>
 
 				{/* Unmounted outright when docking, so it doesn't play its exit
 				    animation while the docked column takes its place */}
@@ -1477,20 +1497,6 @@ function useMediaQuery(query: string) {
 		return () => mq.removeEventListener("change", onChange);
 	}, [query]);
 	return matches;
-}
-
-// Keeps a panel mounted after it's closed until its exit animation finishes.
-// Put onAnimationEnd on the element running the exit animation.
-function useExitAnimation(open: boolean) {
-	const [mounted, setMounted] = useState(open);
-	useEffect(() => {
-		if (open) setMounted(true);
-	}, [open]);
-	const closing = !open;
-	function onAnimationEnd(e: React.AnimationEvent) {
-		if (closing && e.target === e.currentTarget) setMounted(false);
-	}
-	return { mounted, closing, onAnimationEnd };
 }
 
 function LogPanel({

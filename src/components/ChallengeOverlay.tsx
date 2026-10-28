@@ -58,13 +58,8 @@ export function ChallengeOverlay({
 	const target = game.players.find((p) => p.id === pc.targetId)!;
 	const meta = CHALLENGE_META[pc.challengeType];
 
-	const box =
-		"bg-[#fff0f5] rounded-[22px] p-7 max-w-[480px] w-full text-center shadow-2xl max-h-[86vh] overflow-y-auto";
-	const wrap = (children: React.ReactNode) => (
-		<div className="fixed inset-0 bg-[rgba(0,0,0,0.55)] flex items-center justify-center z-50 p-5">
-			<div className={box}>{children}</div>
-		</div>
-	);
+	// The surrounding Modal in GameScreen provides the backdrop and panel
+	const wrap = (children: React.ReactNode) => <>{children}</>;
 
 	if (pc.stage === "awaiting_flip") {
 		if (pc.guess === null) {

@@ -178,16 +178,15 @@ export function LobbyScreen({
 				</button>
 			</div>
 			<SiteFooter />
-			{settingsOpen && (
-				<LobbySettingsModal
-					state={state}
-					canEdit={iAmHost}
-					onClose={() => setSettingsOpen(false)}
-					onSetPublic={onSetPublic}
-					onSetPacks={onSetPacks}
-					onSetStreamerMode={onSetStreamerMode}
-				/>
-			)}
+			<LobbySettingsModal
+				open={settingsOpen}
+				state={state}
+				canEdit={iAmHost}
+				onClose={() => setSettingsOpen(false)}
+				onSetPublic={onSetPublic}
+				onSetPacks={onSetPacks}
+				onSetStreamerMode={onSetStreamerMode}
+			/>
 		</section>
 	);
 }
