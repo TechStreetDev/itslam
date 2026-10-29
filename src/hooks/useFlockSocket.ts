@@ -8,7 +8,8 @@ import {
 	useSyncExternalStore,
 } from "react";
 import { io, Socket } from "socket.io-client";
-import { LobbiesPage, LobbyView, PackId } from "@/lib/types";
+import { ChatMessage, LobbiesPage, LobbyView, PackId, SessionInfo } from "@/lib/types";
+import { onAuth } from "@/lib/signIn";
 import {
 	getServerTabStatus,
 	getTabStatus,
@@ -44,6 +45,9 @@ export function useFlockSocket() {
 	const [landingError, setLandingError] = useState("");
 	const [connected, setConnected] = useState(false);
 	const [reconnecting, setReconnecting] = useState(false);
+	const [session, setSession] = useState<SessionInfo | null>(null);
+	const [chat, setChat] = useState<ChatMessage[]>([]);
+	const [chatHistoryTs, setChatHistoryTs] = useState(0);
 	const myIdRef = useRef<string>("");
 	const savedCodeRef = useRef<string>("");
 	const toastCounter = useRef(0);
@@ -152,16 +156,26 @@ export function useFlockSocket() {
 		socket.on("lobbies_list", (page: LobbiesPage) => {
 			setLobbiesPage(page);
 		});
+		socket.on("session", setSession);
+		socket.on("chat_history", (history: ChatMessage[]) => {
+			setChat(history);
+			setChatHistoryTs(history.length ? history[history.length - 1].ts : 0);
+		});
+		socket.on("chat", (msg: ChatMessage) =>
+			setChat((c) => [...c, msg].slice(-100)),
+		);
 		socket.on("kicked", () => {
 			localStorage.removeItem("flock_code");
 			savedCodeRef.current = "";
 			setState(null);
+			setChat([]);
 			setLandingError("You were kicked from the lobby.");
 		});
 		socket.on("disbanded", () => {
 			localStorage.removeItem("flock_code");
 			savedCodeRef.current = "";
 			setState(null);
+			setChat([]);
 			setLandingError("The host left and the lobby was disbanded.");
 		});
 		socket.on("error_msg", (msg: string) => {
@@ -186,12 +200,60 @@ export function useFlockSocket() {
 			setConnected(false);
 			setReconnecting(false);
 			setState(null);
+			setSession(null);
+			setChat([]);
 		};
 	}, [toast, tabStatus, activityMode, activity]);
+
+	// A popup sign-in upgrades the live socket in place - no reconnect, so nobody's
+	// seat flickers offline mid-game
+	useEffect(
+		() =>
+			onAuth((result) => {
+				if (result.ok && result.token) {
+					socketRef.current?.emit("authenticate", { token: result.token });
+					toast(`Signed in as ${result.user?.username ?? "you"}`);
+				} else {
+					toast("Discord sign-in didn't work - try again.", true);
+				}
+			}),
+		[toast],
+	);
 
 	const emit = useCallback((event: string, payload?: any) => {
 		socketRef.current?.emit(event, payload);
 	}, []);
+
+	const sendChat = useCallback(
+		(text: string) => {
+			emit("chat_send", { text });
+		},
+		[emit],
+	);
+
+	// Resolves with an error message, or null once the report is saved
+	const reportChat = useCallback(
+		async (messageId: string, reason: string, details: string): Promise<string | null> => {
+			const socket = socketRef.current;
+			if (!socket) return "Not connected - try again in a moment.";
+			try {
+				const res = await socket
+					.timeout(10000)
+					.emitWithAck("chat_report", { messageId, reason, details });
+				return res?.error ?? null;
+			} catch {
+				return "Couldn't reach the server - try again.";
+			}
+		},
+		[],
+	);
+
+	const sendQuickChat = useCallback(
+		(quick: number) => {
+			emit("chat_send", { quick });
+		},
+		[emit],
+	);
 
 	const createLobby = useCallback(
 		(name: string) => {
@@ -225,6 +287,7 @@ export function useFlockSocket() {
 		emit("leave_lobby");
 		localStorage.removeItem("flock_code");
 		setState(null);
+		setChat([]);
 		// The Activity has no landing page to fall back to - offer a way back in
 		if (activity) setLandingError("You left the voice channel game.");
 	}, [emit, activity]);
@@ -292,5 +355,11 @@ export function useFlockSocket() {
 		setStreamerMode,
 		regenerateCode,
 		kickPlayer,
+		session,
+		chat,
+		chatHistoryTs,
+		sendChat,
+		sendQuickChat,
+		reportChat,
 	};
 }

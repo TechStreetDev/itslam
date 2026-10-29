@@ -211,7 +211,6 @@ export interface PendingChallengeView {
 	loserId?: string;
 	flipResult?: "heads" | "butts";
 	flipCount?: number;
-	// Time left in the Re-Flip window when this view was sent (avoids client clock skew)
 	reflipMsLeft?: number;
 }
 
@@ -231,7 +230,6 @@ export interface GameView {
 	ended: boolean;
 	results: GameResults | null;
 	challengeUsedThisTurn: boolean;
-	// Per-player tutorial progress (0-1) during the tutorial phase; null once play has begun
 	tutorialProgress: Record<string, number> | null;
 }
 
@@ -243,10 +241,51 @@ export interface LobbyView {
 	players: LobbyPlayerPublic[];
 	game: GameView | null;
 	isPublic: boolean;
-	// Lobby tied to a Discord voice channel Activity - joined automatically, not by code
 	isActivity?: boolean;
 	packs: PackId[];
 	streamerMode: boolean;
+}
+
+// Lobby chat - only players signed in with Discord can send
+export const CHAT_MAX_LENGTH = 200;
+export const QUICK_RESPONSES = [
+	"Hello!",
+	"Good luck!",
+	"Nice move!",
+	"Oops!",
+	"Noooo!",
+	"Thinking...",
+	"Be right back",
+	"Good game!",
+	"Rematch?",
+	"Baa already!",
+	"Yoink!",
+] as const;
+
+export interface ChatMessage {
+	id: string;
+	playerId: string;
+	name: string;
+	text: string;
+	ts: number;
+	quick?: boolean;
+}
+
+export const REPORT_REASONS = [
+	{id: "spam", label: "Spam"},
+	{id: "harassment", label: "Harassment or bullying"},
+	{id: "hate", label: "Hate speech"},
+	{id: "sexual", label: "Sexual content"},
+	{id: "personal_info", label: "Sharing personal info"},
+	{id: "other", label: "Something else"},
+] as const;
+
+export type ReportReason = (typeof REPORT_REASONS)[number]["id"];
+export const REPORT_DETAILS_MAX = 500;
+export interface SessionInfo {
+	loginEnabled: boolean;
+	user: {id: string; username: string; avatar: string | null} | null;
+	muted: {until: number | null} | null;
 }
 
 export interface PublicLobbyEntry {
@@ -267,43 +306,52 @@ export interface CreateLobbyPayload {
 	playerId: string;
 	name: string;
 }
+
 export interface JoinLobbyPayload {
 	playerId: string;
 	name: string;
 	code: string;
 }
+
 export interface RejoinPayload {
 	playerId: string;
 	code: string;
 }
+
 export interface PlaySheepPayload {
 	headCardId?: string;
 	buttCardId?: string;
 	extraCardId?: string;
 	modifierCardId?: string;
 }
+
 export interface PlayActionPayload {
 	cardId: string;
 	targetPlayerId: string;
 	targetSheepId?: string;
 }
+
 export interface BodyswapPayload {
 	handCardId: string;
 	targetPlayerId: string;
 	targetSheepId: string;
 	removeCardId: string;
 }
+
 export interface PlayChallengePayload {
 	cardId: string;
 	targetPlayerId: string;
 	guess: "heads" | "butts";
 }
+
 export interface ChallengeGuessPayload {
 	guess: "heads" | "butts";
 }
+
 export interface EndTurnPayload {
 	discardCardIds: string[];
 }
+
 export interface ResolveChallengeEffectPayload {
 	sheepIds?: string[];
 	halves?: { sheepId: string; keepCardId: string }[];

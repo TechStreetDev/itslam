@@ -3,10 +3,12 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { isDiscordActivity } from "@/lib/discordActivity";
+import { onAuth, signInWithPopup } from "@/lib/signIn";
+import { canOpenAdmin, Permission } from "@/lib/roleDefs";
 
 interface Me {
 	loginEnabled: boolean;
-	user: { id: string; username: string; permissions: string[] } | null;
+	user: { id: string; username: string; permissions: Permission[] } | null;
 }
 
 const linkClass = "text-[11px] font-semibold text-[#8a5a70] underline hover:text-[#c05090] transition";
@@ -18,10 +20,16 @@ export function SiteFooter() {
 
 	useEffect(() => {
 		if (inActivity) return;
-		fetch("/api/me")
-			.then((r) => (r.ok ? r.json() : null))
-			.then(setMe)
-			.catch(() => setMe(null));
+		const load = () =>
+			fetch("/api/me")
+				.then((r) => (r.ok ? r.json() : null))
+				.then(setMe)
+				.catch(() => setMe(null));
+		load();
+		// Signed in from the popup - pick up the new session cookie
+		return onAuth((result) => {
+			if (result.ok) load();
+		});
 	}, [inActivity]);
 
 	// Leaving the page would drop the Activity's launch params, and login is already Discord's
@@ -35,7 +43,7 @@ export function SiteFooter() {
 			{me?.user ? (
 				<>
 					<span>&middot;</span>
-					{me.user.permissions.includes("view_stats") && (
+					{canOpenAdmin(me.user.permissions) && (
 						<>
 							<Link href="/admin" className={linkClass}>
 								Admin
@@ -51,7 +59,15 @@ export function SiteFooter() {
 				me?.loginEnabled && (
 					<>
 						<span>&middot;</span>
-						<a href="/auth/discord" className={linkClass}>
+						<a
+							href="/auth/discord"
+							onClick={(e) => {
+								// Popup, so signing in never pulls anyone out of their lobby
+								e.preventDefault();
+								signInWithPopup();
+							}}
+							className={linkClass}
+						>
 							Log in
 						</a>
 					</>

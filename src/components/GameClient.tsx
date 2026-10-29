@@ -8,6 +8,7 @@ import { LandingScreen } from "@/components/LandingScreen";
 import { LobbyScreen } from "@/components/LobbyScreen";
 import { GameScreen } from "@/components/GameScreen";
 import { ActivityPreview } from "@/components/ActivityPreview";
+import { ChatWidget, useChatState } from "@/components/ChatWidget";
 
 const panelClass =
 	"bg-[#fff0f5] rounded-[22px] shadow-[0_6px_18px_rgba(130,50,90,0.18)] p-9 max-w-[420px] w-full text-center border-[3px] border-white";
@@ -47,7 +48,15 @@ export function GameClient() {
 		setStreamerMode,
 		regenerateCode,
 		kickPlayer,
+		session,
+		chat,
+		chatHistoryTs,
+		sendChat,
+		sendQuickChat,
+		reportChat,
 	} = useFlockSocket();
+	const chatState = useChatState(chat, myId, chatHistoryTs);
+	const chatEnabled = !!session;
 
 	// Mirror lobby/game status onto the players' Discord profiles
 	const gameStartRef = useRef<number | undefined>(undefined);
@@ -188,6 +197,24 @@ export function GameClient() {
 					myId={myId}
 					emit={emit}
 					onBackToMenu={() => emit("return_to_lobby")}
+					chat={
+						chatEnabled
+							? { unread: chatState.unread, open: () => chatState.setMobileOpen(true) }
+							: null
+					}
+				/>
+			)}
+
+			{state && !pip && (
+				<ChatWidget
+					messages={chat}
+					myId={myId}
+					session={session}
+					chatState={chatState}
+					onSend={sendChat}
+					onQuick={sendQuickChat}
+					onReport={reportChat}
+					mobileLauncher={!state.game}
 				/>
 			)}
 		</>

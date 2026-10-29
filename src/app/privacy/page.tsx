@@ -7,7 +7,7 @@ export const metadata: Metadata = {
 	alternates: { canonical: "/privacy" },
 };
 
-const LAST_UPDATED = "25 October 2026";
+const LAST_UPDATED = "28 October 2026";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
 	return (
@@ -105,10 +105,34 @@ export default function PrivacyPage() {
 						you a site role. Login records are deleted automatically after 90 days.
 					</p>
 					<p>
-						If you have been given a site role (playtester, viewer or admin), your Discord
+						If you have been given a site role (playtester, moderator, viewer or admin), your Discord
 						account ID, your roles, and the username and avatar from
 						your most recent login are also stored in our database, so admins can see who
 						has which role. This is kept for as long as you have a role.
+					</p>
+				</Section>
+
+				<Section title="Lobby chat and reports">
+					<p>
+						Chat messages are shared with everyone in your lobby. The lobby keeps its most
+						recent 100 messages while it exists (on our server and in our short-term lobby
+						store, which expires after 2 hours of inactivity). Typing your own messages
+						requires logging in with Discord, and we note which Discord account sent each
+						typed message - this is never shown to other players. Anyone can send the preset
+						quick responses.
+					</p>
+					<p>
+						If you report a message, we save the report in our database: the reason and any
+						details you give, the reported message, the in-game names and Discord account IDs
+						of the person reported and of you (if you&rsquo;re logged in), the lobby code, and
+						the lobby&rsquo;s recent chat (up to 100 messages) so an admin can see what
+						happened. Only site moderators and admins can see reports, and they are deleted automatically
+						after 180 days.
+					</p>
+					<p>
+						Moderators and admins can mute a Discord account from typed chat for a set time or permanently.
+						While a mute is in place we store the account ID, its Discord username, the reason
+						and who applied it. Mutes are deleted when they end or are lifted.
 					</p>
 				</Section>
 

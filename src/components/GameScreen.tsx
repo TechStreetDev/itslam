@@ -69,11 +69,14 @@ export function GameScreen({
 	myId,
 	emit,
 	onBackToMenu,
+	chat,
 }: {
 	state: LobbyView;
 	myId: string;
 	emit: (event: string, payload?: any) => void;
 	onBackToMenu: () => void;
+	// Mobile header button for the chat sheet - null when chat isn't available
+	chat: { unread: number; open: () => void } | null;
 }) {
 	const game = state.game as GameView;
 	const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -665,6 +668,20 @@ export function GameScreen({
 						</span>
 					</div>
 					<div className="flex items-center gap-3">
+						{/* Desktop has the chat in the bottom-left corner instead */}
+						{chat && (
+							<button
+								onClick={chat.open}
+								className="md:hidden relative text-[#fbf4e4] underline font-bold text-sm"
+							>
+								Chat
+								{chat.unread > 0 && (
+									<span className="absolute -top-2 -right-3.5 min-w-[16px] h-4 px-1 rounded-full bg-[#e0306a] text-white text-[10px] font-black no-underline flex items-center justify-center tabular-nums">
+										{chat.unread > 9 ? "9+" : chat.unread}
+									</span>
+								)}
+							</button>
+						)}
 						{iAmHost && !game.ended && (
 							<button
 								onClick={() => setEndGameConfirm(true)}

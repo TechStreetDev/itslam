@@ -10,6 +10,7 @@ import { ActionsTab, ChallengesTab, OverviewTab, SeatsTab, SheepTab } from "./ad
 import { GamesTab } from "./admin/GamesTab";
 import { ExplorerTab } from "./admin/ExplorerTab";
 import { RolesTab } from "./admin/RolesTab";
+import { ReportsTab } from "./admin/ReportsTab";
 import type { Permission } from "@/lib/roleDefs";
 
 const REFRESH_MS = 10_000;
@@ -24,6 +25,7 @@ const TABS = [
 	{ id: "seats", label: "Seats & balance", needsDb: true, filtered: true, perm: "view_stats" },
 	{ id: "explore", label: "Explore", needsDb: true, filtered: true, perm: "manage" },
 	{ id: "roles", label: "Roles", needsDb: false, filtered: false, perm: "manage" },
+	{ id: "reports", label: "Reports", needsDb: false, filtered: false, perm: "moderate_chat" },
 ] as const satisfies readonly { id: string; label: string; needsDb: boolean; filtered: boolean; perm: Permission }[];
 type TabId = (typeof TABS)[number]["id"];
 
@@ -77,7 +79,8 @@ export function AdminDashboard() {
 	};
 	const permissions = auth.kind === "ok" ? auth.status.user.permissions : [];
 	const tabs = TABS.filter((t) => permissions.includes(t.perm));
-	const current = tabs.find((t) => t.id === tab) ?? TABS[0];
+	// Moderators can't see Live, so fall back to the first tab they do have
+	const current = tabs.find((t) => t.id === tab) ?? tabs[0] ?? TABS[0];
 	const mysql = auth.kind === "ok" && auth.status.mysql;
 	const canManage = permissions.includes("manage");
 
@@ -107,7 +110,7 @@ export function AdminDashboard() {
 						</a>
 					</Message>
 				)}
-				{auth.kind === "forbidden" && <Message title="No admin access">Your Discord account doesn&rsquo;t have the Viewer or Admin role.</Message>}
+				{auth.kind === "forbidden" && <Message title="No admin access">Your Discord account doesn&rsquo;t have the Moderator, Viewer or Admin role.</Message>}
 				{auth.kind === "error" && <Message title="Couldn't load the admin area">{auth.message}</Message>}
 
 				{auth.kind === "ok" && (
@@ -146,6 +149,7 @@ export function AdminDashboard() {
 								{current.id === "seats" && <SeatsTab filters={filters} />}
 								{current.id === "explore" && <ExplorerTab filters={filters} />}
 								{current.id === "roles" && <RolesTab myId={auth.status.user.id} mysql={mysql} />}
+								{current.id === "reports" && <ReportsTab myId={auth.status.user.id} mysql={mysql} />}
 							</>
 						)}
 					</>

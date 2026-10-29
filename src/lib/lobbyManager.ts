@@ -1,4 +1,5 @@
 import * as engine from "./engine";
+import type { ChatRecord } from "./chatModeration";
 import { PACKS, normalizePacks } from "./deck";
 import {
 	GameState,
@@ -34,6 +35,8 @@ export interface Lobby {
 	activityId?: string;
 	// Blurs the lobby code on everyone's screen so it can't leak on a stream
 	streamerMode?: boolean;
+	// Recent chat, oldest first - capped so it stays small in Redis
+	chat?: ChatRecord[];
 }
 
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";

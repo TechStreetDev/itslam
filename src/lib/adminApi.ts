@@ -17,6 +17,7 @@ import {
 	explore,
 } from "./analytics";
 import type { ExploreQuery } from "./analyticsSchema";
+import { listMutes, listReports, removeMute, reportDetail, setMute, setReportStatus } from "./chatModeration";
 
 const MAX_BODY = 64 * 1024;
 
@@ -61,7 +62,7 @@ export async function handleAdminApi(
 	if (!path.startsWith("/api/admin/")) return false;
 
 	if (!user) return sendJson(res, 401, { error: "Not logged in" }), true;
-	if (!can(user, "view_stats")) return sendJson(res, 403, { error: "No access" }), true;
+	if (!can(user, "view_stats") && !can(user, "moderate_chat")) return sendJson(res, 403, { error: "No access" }), true;
 
 	const method = req.method || "GET";
 	// Mutations need a custom header, which cross-site forms/fetches can't send without CORS approval
@@ -78,6 +79,14 @@ export async function handleAdminApi(
 		route === "POST /api/admin/explore" ||
 		path.startsWith("/api/admin/roles");
 	if (manageOnly && !can(user, "manage")) return sendJson(res, 403, { error: "Admins only" }), true;
+	const reportMatch = path.match(/^\/api\/admin\/reports\/(\d+)$/);
+	const muteMatch = path.match(/^\/api\/admin\/mutes\/(\d+)$/);
+	// Reports hold chat messages and who sent them - moderators only, not every stats viewer
+	const moderation = path.startsWith("/api/admin/reports") || path.startsWith("/api/admin/mutes");
+	if (moderation && !can(user, "moderate_chat")) return sendJson(res, 403, { error: "Moderators only" }), true;
+	// Moderators can only reach the reports - everything else is statistics or management
+	if (!moderation && route !== "GET /api/admin/status" && !can(user, "view_stats"))
+		return sendJson(res, 403, { error: "No access" }), true;
 
 	try {
 		let body: unknown;
@@ -107,6 +116,30 @@ export async function handleAdminApi(
 		} else if (roleMatch && method === "DELETE") {
 			await setRoles(roleMatch[1], [], user.id);
 			body = await listRoles();
+		} else if (route === "GET /api/admin/reports") {
+			const status = url.searchParams.get("status") || "open";
+			const page = Math.max(0, parseInt(url.searchParams.get("page") || "0", 10) || 0);
+			body = await listReports(status, page);
+		} else if (reportMatch && method === "GET") body = await reportDetail(Number(reportMatch[1]));
+		else if (reportMatch && method === "POST") {
+			const { status, note } = await readJson(req);
+			await setReportStatus(Number(reportMatch[1]), status, typeof note === "string" ? note : null, user.id);
+			body = await reportDetail(Number(reportMatch[1]));
+		} else if (route === "GET /api/admin/mutes") body = await listMutes();
+		else if (muteMatch && method === "PUT") {
+			// minutes: null for a permanent mute
+			const { minutes, reason, username } = await readJson(req);
+			await setMute(
+				muteMatch[1],
+				minutes === null ? null : Number(minutes),
+				typeof reason === "string" ? reason : null,
+				typeof username === "string" ? username : null,
+				user.id,
+			);
+			body = await listMutes();
+		} else if (muteMatch && method === "DELETE") {
+			await removeMute(muteMatch[1]);
+			body = await listMutes();
 		} else return sendJson(res, 404, { error: "Not found" }), true;
 
 		sendJson(res, 200, body);

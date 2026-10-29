@@ -23,6 +23,16 @@ import { can, initRoles } from "./src/lib/roles";
 import { pruneLogins } from "./src/lib/logins";
 import { recordGame } from "./src/lib/gameRecorder";
 import { handleAdminApi, readJson, sendJson } from "./src/lib/adminApi";
+import { CHAT_MAX_LENGTH, QUICK_RESPONSES, REPORT_DETAILS_MAX, REPORT_REASONS, SessionInfo } from "./src/lib/types";
+import {
+	ChatRecord,
+	createReport,
+	initMutes,
+	muteOf,
+	onMuteChange,
+	pruneReports,
+	publicChat,
+} from "./src/lib/chatModeration";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = parseInt(process.env.PORT || "3000", 10);
@@ -40,6 +50,31 @@ const pendingResetTimers = new Map<string, ReturnType<typeof setTimeout>>();
 // How long a player who drops mid-game has to reconnect before a bot takes over
 const RECONNECT_GRACE_MS = 10000;
 const pendingBotTakeovers = new Map<string, ReturnType<typeof setTimeout>>();
+
+// Chat: messages kept per lobby (also what a report saves as context), and how many
+// one socket can send per window
+const CHAT_HISTORY = 100;
+const CHAT_RATE_MAX = 5;
+const CHAT_RATE_WINDOW_MS = 8000;
+// Reports one player can file per window - keyed by Discord account (or player ID when
+// signed out) rather than socket, so reconnecting doesn't reset it
+const REPORT_RATE_MAX = 5;
+const REPORT_RATE_WINDOW_MS = 30 * 60 * 1000;
+const reportTimes = new Map<string, number[]>();
+
+function sessionInfo(user: SessionUser | null): SessionInfo {
+	const mute = muteOf(user?.id);
+	return {
+		loginEnabled: authConfigured(),
+		user: user && { id: user.id, username: user.username, avatar: user.avatar },
+		muted: mute && { until: mute.until },
+	};
+}
+
+function muteText(until: number | null): string {
+	if (until === null) return "You've been muted from chat.";
+	return `You're muted from chat until ${new Date(until).toUTCString().replace(/:\d\d GMT$/, " UTC")}.`;
+}
 
 // Discord Activity players are keyed by their Discord ID, so only that user's session may use it
 const ACTIVITY_PLAYER_PREFIX = "discord_";
@@ -76,7 +111,7 @@ app.prepare().then(async () => {
 		switch (url.pathname) {
 			case "/auth/discord":
 				if (!authConfigured()) return sendJson(res, 503, { error: "Login is not configured" });
-				return startLogin(res);
+				return startLogin(res, url.searchParams.has("popup"));
 			case "/auth/discord/callback":
 				if (!authConfigured()) return sendJson(res, 503, { error: "Login is not configured" });
 				return finishLogin(req, res, url);
@@ -340,6 +375,14 @@ app.prepare().then(async () => {
 	connectRedis();
 	await connectDb();
 	await initRoles().catch((e) => console.error("[MySQL] loading roles failed:", e.message));
+	await initMutes().catch((e) => console.error("[MySQL] loading chat mutes failed:", e.message));
+	// An admin muted or unmuted someone - update any game they have open right now
+	onMuteChange((discordId) => {
+		for (const s of io.sockets.sockets.values()) {
+			const u = s.data.user as SessionUser | null | undefined;
+			if (u?.id === discordId) s.emit("session", sessionInfo(u));
+		}
+	});
 	lobbyManager.onRemove = (lobby) => {
 		if (lobby.game?.started && !lobby.game.ended) recordGame(lobby, "abandoned");
 	};
@@ -359,14 +402,133 @@ app.prepare().then(async () => {
 	setInterval(() => lobbyManager.removeEmptyLobbies(), 60 * 1000).unref();
 	pruneLogins();
 	setInterval(pruneLogins, 6 * 60 * 60 * 1000).unref();
+	pruneReports();
+	setInterval(pruneReports, 6 * 60 * 60 * 1000).unref();
+	// Forget report rate limits once they've run out
+	setInterval(() => {
+		const now = Date.now();
+		for (const [key, times] of reportTimes)
+			if (times.every((t) => now - t >= REPORT_RATE_WINDOW_MS)) reportTimes.delete(key);
+	}, REPORT_RATE_WINDOW_MS).unref();
 
 	io.on("connection", (socket: Socket) => {
 		let currentCode: string | null = null;
 		let currentPlayerId: string | null = null;
-		// Web sockets carry the session cookie; Activity sockets pass the token on connect
-		const socketUser: SessionUser | null =
+		// Web sockets carry the session cookie; Activity sockets pass the token on connect.
+		// Can change later when someone signs in from a popup mid-game ("authenticate").
+		let socketUser: SessionUser | null =
 			sessionFromToken(socket.handshake.auth?.token) ?? getSessionUser(socket.request);
+		// Fixed at connect - an Activity seat belongs to whoever opened the socket
 		const activityPlayerId = socketUser ? ACTIVITY_PLAYER_PREFIX + socketUser.id : null;
+		const chatSentAt: number[] = [];
+		const reportedIds = new Set<string>();
+
+		function sendSession() {
+			socket.data.user = socketUser;
+			socket.emit("session", sessionInfo(socketUser));
+		}
+		sendSession();
+
+		socket.on("authenticate", ({ token }: { token: string }) => {
+			const user = sessionFromToken(token);
+			if (!user) {
+				socket.emit("error_msg", "Sign-in failed - please try again.");
+				return;
+			}
+			socketUser = user;
+			sendSession();
+		});
+
+		socket.on("chat_send", ({ text, quick }: { text?: string; quick?: number }) => {
+			try {
+				// Quick responses are presets, so anyone can send them; free text needs sign-in
+				const preset =
+					Number.isInteger(quick) ? QUICK_RESPONSES[quick as number] : undefined;
+				if (quick !== undefined && !preset) throw new Error("Unknown quick response.");
+				if (!preset && !socketUser) throw new Error("Sign in with Discord to chat.");
+				const mute = preset ? null : muteOf(socketUser?.id);
+				if (mute) throw new Error(`${muteText(mute.until)} You can still use quick responses.`);
+				const lobby = lobbyManager.getLobby(currentCode);
+				const p = lobby && lobbyManager.findPlayer(lobby, currentPlayerId);
+				if (!lobby || !p) throw new Error("You're not in a lobby.");
+				const clean = (preset ?? (typeof text === "string" ? text : ""))
+					.replace(/[\u0000-\u001f\u007f]/g, " ")
+					.trim()
+					.slice(0, CHAT_MAX_LENGTH);
+				if (!clean) return;
+				const now = Date.now();
+				while (chatSentAt.length && now - chatSentAt[0] > CHAT_RATE_WINDOW_MS) chatSentAt.shift();
+				if (chatSentAt.length >= CHAT_RATE_MAX) throw new Error("Slow down a little!");
+				chatSentAt.push(now);
+
+				const msg: ChatRecord = {
+					id: now.toString(36) + Math.random().toString(36).slice(2, 6),
+					playerId: p.id,
+					name: p.name,
+					text: clean,
+					ts: now,
+					...(preset
+						? { quick: true }
+						: // Kept server-side so a report can say whose account sent it
+							{ discordId: socketUser!.id, discordName: socketUser!.username }),
+				};
+				lobby.chat = [...(lobby.chat ?? []), msg].slice(-CHAT_HISTORY);
+				for (const pl of lobby.players) {
+					if (pl.socketId && !pl.isBot) io.to(pl.socketId).emit("chat", publicChat(msg));
+				}
+				saveLobby(lobby);
+			} catch (e: any) {
+				socket.emit("error_msg", e.message || "Something went wrong.");
+			}
+		});
+
+		socket.on(
+			"chat_report",
+			async (
+				{ messageId, reason, details }: { messageId: string; reason: string; details?: string },
+				ack?: (res: { ok: true } | { error: string }) => void,
+			) => {
+				const reply = typeof ack === "function" ? ack : () => {};
+				try {
+					const lobby = lobbyManager.getLobby(currentCode);
+					const p = lobby && lobbyManager.findPlayer(lobby, currentPlayerId);
+					if (!lobby || !p) throw new Error("You're not in a lobby.");
+					const r = REPORT_REASONS.find((x) => x.id === reason);
+					if (!r) throw new Error("Pick a reason for the report.");
+					const msg = lobby.chat?.find((m) => m.id === messageId);
+					// Quick responses are presets - only typed messages can be reported
+					if (!msg || msg.quick || !msg.discordId) throw new Error("That message can't be reported.");
+					if (msg.playerId === p.id) throw new Error("You can't report your own message.");
+					if (reportedIds.has(msg.id)) throw new Error("You've already reported that message.");
+					const now = Date.now();
+					const reporterKey = socketUser ? `discord:${socketUser.id}` : `player:${p.id}`;
+					const reportedAt = (reportTimes.get(reporterKey) ?? []).filter((t) => now - t < REPORT_RATE_WINDOW_MS);
+					reportTimes.set(reporterKey, reportedAt);
+					if (reportedAt.length >= REPORT_RATE_MAX)
+						throw new Error("You've sent a lot of reports - try again in a few minutes.");
+
+					const clean =
+						typeof details === "string"
+							? details.replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, " ").trim().slice(0, REPORT_DETAILS_MAX)
+							: "";
+					await createReport({
+						reason: r.id,
+						details: clean || null,
+						lobbyCode: lobby.code,
+						message: msg as ChatRecord & { discordId: string },
+						reporterDiscordId: socketUser?.id ?? null,
+						reporterName: p.name,
+						context: lobby.chat ?? [],
+					});
+					reportedAt.push(now);
+					reportedIds.add(msg.id);
+					reply({ ok: true });
+				} catch (e: any) {
+					if (!(e instanceof Error) || (e as any).code) console.error("Chat report:", e);
+					reply({ error: (e as any)?.code ? "Couldn't send the report - try again." : e.message });
+				}
+			},
+		);
 
 		function checkPlayerId(playerId: unknown): string {
 			if (typeof playerId !== "string" || !playerId) throw new Error("Invalid player.");
@@ -413,6 +575,7 @@ app.prepare().then(async () => {
 						socket.id;
 					socket.join(lobby.code);
 					socket.emit("joined", { code: lobby.code, playerId });
+					socket.emit("chat_history", (lobby.chat ?? []).map(publicChat));
 					broadcast(lobby);
 				} catch (e: any) {
 					socket.emit("error_msg", e.message);
@@ -449,6 +612,7 @@ app.prepare().then(async () => {
 					p.connected = true;
 					socket.join(lobby.code);
 					socket.emit("joined", { code: lobby.code, playerId });
+					socket.emit("chat_history", (lobby.chat ?? []).map(publicChat));
 					broadcast(lobby);
 				} catch (e: any) {
 					socket.emit("error_msg", e.message);
@@ -474,6 +638,7 @@ app.prepare().then(async () => {
 					p.isReplacement = false;
 					socket.join(lobby.code);
 					socket.emit("joined", { code: lobby.code, playerId });
+					socket.emit("chat_history", (lobby.chat ?? []).map(publicChat));
 					broadcast(lobby);
 				} catch (e: any) {
 					socket.emit("error_msg", e.message);
@@ -506,6 +671,7 @@ app.prepare().then(async () => {
 				p.isReplacement = false;
 				socket.join(lobby.code);
 				socket.emit("joined", { code: lobby.code, playerId: activityPlayerId });
+				socket.emit("chat_history", (lobby.chat ?? []).map(publicChat));
 				broadcast(lobby);
 			} catch (e: any) {
 				socket.emit("error_msg", e.message);

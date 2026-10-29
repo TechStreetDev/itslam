@@ -164,8 +164,11 @@ async function recordSessionLogin(session: Session) {
 	await touchRoleProfile(session);
 }
 
-export function startLogin(res: ServerResponse) {
-	const state = randomBytes(16).toString("hex");
+// popup: signing in from inside a game - the callback hands the session back to the
+// game window instead of navigating, so nobody gets pulled out of their lobby
+export function startLogin(res: ServerResponse, popup = false) {
+	const nonce = randomBytes(16).toString("hex");
+	const state = popup ? `${nonce}.popup` : nonce;
 	const params = new URLSearchParams({
 		client_id: process.env.DISCORD_CLIENT_ID!,
 		redirect_uri: redirectUri(),
@@ -184,20 +187,56 @@ export async function finishLogin(req: IncomingMessage, res: ServerResponse, url
 	const code = url.searchParams.get("code");
 	const state = url.searchParams.get("state");
 	const expectedState = parseCookies(req)[STATE_COOKIE];
-	if (!code || !state || !expectedState || state !== expectedState) {
-		redirect(res, "/?login=failed", [clearState]);
-		return;
-	}
+	const popup = !!expectedState?.endsWith(".popup");
+	const fail = () =>
+		popup ? popupResult(res, [clearState], null) : redirect(res, "/?login=failed", [clearState]);
+	if (!code || !state || !expectedState || state !== expectedState) return fail();
 
 	try {
 		const { session } = await exchangeCode(code, redirectUri());
 		await recordSessionLogin(session);
-		const dest = can(session, "view_stats") ? "/admin" : "/";
-		redirect(res, dest, [clearState, cookie(SESSION_COOKIE, encodeSession(session), SESSION_TTL_S)]);
+		const token = encodeSession(session);
+		const cookies = [clearState, cookie(SESSION_COOKIE, token, SESSION_TTL_S)];
+		if (popup) return popupResult(res, cookies, token);
+		const dest = can(session, "view_stats") || can(session, "moderate_chat") ? "/admin" : "/";
+		redirect(res, dest, cookies);
 	} catch (e) {
 		console.error("[Auth] Discord login failed:", (e as Error).message);
-		redirect(res, "/?login=failed", [clearState]);
+		fail();
 	}
+}
+
+// The last page of a popup sign-in: tells the game window how it went, then closes.
+// Discord's pages can cut the popup off from window.opener, so it also goes out on a
+// same-origin BroadcastChannel. The token lets the game's socket sign in without reconnecting.
+export const AUTH_CHANNEL = "itslam-auth";
+
+function popupResult(res: ServerResponse, cookies: string[], token: string | null) {
+	const session = token ? decodeSession(token) : null;
+	const msg = {
+		type: "itslam:auth",
+		ok: !!session,
+		token: session ? token : undefined,
+		user: session ? { id: session.id, username: session.username, avatar: session.avatar } : undefined,
+	};
+	// Usernames can hold anything - keep them from closing the script tag
+	const json = JSON.stringify(msg).replace(/</g, "\\u003c");
+	const text = session ? "Signed in! You can close this window." : "Sign-in didn't work - close this window and try again.";
+	res.writeHead(200, {
+		"Content-Type": "text/html; charset=utf-8",
+		"Cache-Control": "no-store",
+		"Set-Cookie": cookies,
+	});
+	res.end(`<!doctype html><html><head><meta charset="utf-8"><title>Signing in</title></head>
+<body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:#fdf2f7;color:#7a3a58;font:700 15px system-ui,sans-serif;text-align:center;padding:0 24px">
+<p>${text}</p>
+<script>
+var msg = ${json};
+try { new BroadcastChannel(${JSON.stringify(AUTH_CHANNEL)}).postMessage(msg); } catch (e) {}
+try { if (window.opener) window.opener.postMessage(msg, location.origin); } catch (e) {}
+if (msg.ok) setTimeout(function () { window.close(); }, 400);
+</script>
+</body></html>`);
 }
 
 // --- Discord Activity ---
