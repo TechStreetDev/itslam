@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { RefreshCw, SkipForward } from "lucide-react";
 import { Card, GameView, PartCard, SheepEntity } from "@/lib/types";
 import { CHALLENGE_META, cardMeta } from "@/lib/cardMeta";
 import { SheepChip } from "./SheepChip";
@@ -221,7 +222,7 @@ export function ChallengeOverlay({
 						</div>
 						<p className="text-[#8a5a70] text-[13px] font-semibold mb-3">
 							{secondsLeft > 0
-								? `${secondsLeft}s for anyone holding a 🔄 Re-Flip card to flip again`
+								? `${secondsLeft}s for anyone holding a Re-Flip card to flip again`
 								: "Locking in the result…"}
 						</p>
 
@@ -243,13 +244,38 @@ export function ChallengeOverlay({
 									onClick={() =>
 										emit("play_reflip", { cardId: myReflips[0].id })
 									}
-									className="shrink-0 font-extrabold text-sm px-4 py-3 rounded-full shadow bg-[#c05090] text-white hover:brightness-105 active:translate-y-px"
+									className="shrink-0 inline-flex items-center gap-1.5 font-extrabold text-sm px-4 py-3 rounded-full shadow bg-[#c05090] text-white hover:brightness-105 active:translate-y-px"
 								>
-									🔄 Re-Flip
+									<RefreshCw size={15} strokeWidth={3} />
+									Re-Flip
 								</button>
 							</div>
 						)}
 					</>
+				)}
+				{/* Once the coin has landed, everyone still here agreeing ends the Re-Flip window early */}
+				{!!pc.skipNeeded && !isFlipping && secondsLeft > 0 && (
+					<div className="mt-3 flex justify-center">
+						<button
+							onClick={() => emit("vote_skip_flip")}
+							disabled={pc.skipVoted}
+							title={
+								pc.skipVoted
+									? "You've voted to skip the Re-Flip window"
+									: "Vote to skip the Re-Flip window - this passes on your own Re-Flip"
+							}
+							className="inline-flex items-center gap-1.5 font-extrabold text-[13px] px-4 py-2 rounded-full border-2 border-[#f5d0e8] bg-white text-[#8a5a70] enabled:hover:border-[#c05090] enabled:hover:text-[#c05090] disabled:opacity-70 disabled:cursor-default transition"
+						>
+							<SkipForward size={14} strokeWidth={2.5} />
+							{pc.skipVoted ? "Waiting for others" : "Skip Re-Flip"}
+							{pc.skipNeeded > 1 && (
+								<span className="tabular-nums opacity-75">
+									{" "}
+									· {pc.skipVotes ?? 0}/{pc.skipNeeded}
+								</span>
+							)}
+						</button>
+					</div>
 				)}
 			</>,
 		);

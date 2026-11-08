@@ -7,7 +7,7 @@ const nunito = Nunito({ subsets: ["latin"], weight: ["400", "600", "700", "800"]
 const baloo = Baloo_2({ subsets: ["latin"], weight: ["500", "700", "800"], variable: "--font-baloo" });
 
 export const metadata: Metadata = {
-	title: "ITSLAM - Is That Sheep Looking At Me? Online",
+	title: "ITSLAM Online - Is That Sheep Looking At Me?",
 	description: "Play Is That Sheep Looking At Me? online with friends - the chaotic sheep card game by Zedaph and Creo Cards. Build a flock, flip coins, and sabotage rivals in real time. No download, no account required. Just share a 4-letter code.",
 	keywords: ["ITSLAM", "Is That Sheep Looking At Me", "card game", "online multiplayer", "Zedaph", "Creo Cards", "sheep game", "browser game"],
 	metadataBase: new URL("https://itslam.online"),

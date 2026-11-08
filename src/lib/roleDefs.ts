@@ -14,8 +14,8 @@ export type Permission =
 export const ROLE_META: Record<Role, { label: string; desc: string; permissions: Permission[] }> = {
 	playtester: {
 		label: "Playtester",
-		desc: "Can use hidden card packs and add bots in their lobbies.",
-		permissions: ["hidden_packs", "add_bots"],
+		desc: "Can use hidden card packs in their lobbies.",
+		permissions: ["hidden_packs"],
 	},
 	moderator: {
 		label: "Moderator",
@@ -29,8 +29,8 @@ export const ROLE_META: Record<Role, { label: string; desc: string; permissions:
 	},
 	admin: {
 		label: "Admin",
-		desc: "Viewer, plus deleting games, the explorer and managing roles.",
-		permissions: ["manage"],
+		desc: "Viewer, plus adding bots, deleting games, the explorer and managing roles.",
+		permissions: ["manage", "add_bots"],
 	},
 };
 

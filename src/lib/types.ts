@@ -94,6 +94,8 @@ export interface PendingChallenge {
 	flipResult?: "heads" | "butts";
 	flipCount?: number;
 	reflipDeadline?: number; // server timestamp when the Re-Flip window closes
+	// Players who have voted to end the Re-Flip window early - reset on every flip
+	skipVotes?: string[];
 }
 
 export interface LogEntry {
@@ -170,6 +172,13 @@ export interface GameState {
 	challengeUsedThisTurn: boolean;
 	deckJustEmptied: boolean;
 	deckJustEmptiedHandled?: boolean;
+	// When the current player's turn ends automatically (server time), and which turn that's for.
+	// Unset during the tutorial and on bots' turns.
+	turnDeadline?: number;
+	turnDeadlineFor?: string;
+	// How many times the current turn's timer has fired - it's logged once and retried a few
+	// times at most (e.g. after a Re-Flip window it had to wait for)
+	turnTimeouts?: number;
 	finalRoundActive: boolean;
 	finalRoundQueue: string[];
 	pendingChallenge: PendingChallenge | null;
@@ -191,6 +200,8 @@ export interface LobbyPlayerPublic {
 	name: string;
 	connected: boolean;
 	isBot?: boolean;
+	// Signed in with Discord, so others in the lobby can look at their stats
+	hasStats?: boolean;
 }
 
 export interface PlayerView {
@@ -212,6 +223,10 @@ export interface PendingChallengeView {
 	flipResult?: "heads" | "butts";
 	flipCount?: number;
 	reflipMsLeft?: number;
+	// Vote to end the Re-Flip window early
+	skipVotes?: number;
+	skipNeeded?: number;
+	skipVoted?: boolean;
 }
 
 export interface GameView {
@@ -231,9 +246,18 @@ export interface GameView {
 	results: GameResults | null;
 	challengeUsedThisTurn: boolean;
 	tutorialProgress: Record<string, number> | null;
+	// Time left before the current turn ends itself - missing when no timer is running
+	turnMsLeft?: number;
 }
 
 export const MAX_PLAYERS = 4;
+
+// Lobby settings: how long a turn lasts before it ends itself, and how long a dropped player
+// has to come back before a bot takes their seat. 0 turns either off (unlimited / never).
+export const TURN_SECONDS_OPTIONS = [120, 180, 240, 300, 0] as const;
+export const DEFAULT_TURN_SECONDS = 120;
+export const RECONNECT_SECONDS_OPTIONS = [10, 30, 60, 120, 0] as const;
+export const DEFAULT_RECONNECT_SECONDS = 10;
 
 export interface LobbyView {
 	code: string;
@@ -244,6 +268,8 @@ export interface LobbyView {
 	isActivity?: boolean;
 	packs: PackId[];
 	streamerMode: boolean;
+	turnSeconds: number;
+	reconnectSeconds: number;
 }
 
 // Lobby chat - only players signed in with Discord can send

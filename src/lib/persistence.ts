@@ -6,9 +6,12 @@ const LOBBY_TTL = 7200; // 2 hours
 function stripSockets(lobby: Lobby): Lobby {
 	return {
 		...lobby,
+		// Nobody's socket survives a restart, so humans come back offline until they reconnect.
+		// Bots have no socket and are always there.
 		players: lobby.players.map((p) => ({
-			...p, socketId: null,
-			connected: false
+			...p,
+			socketId: null,
+			connected: !!p.isBot,
 		})),
 	};
 }

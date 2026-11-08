@@ -150,7 +150,7 @@ function describeEvent(e: Row, name: (seat: number) => string): string {
 				? `${who} Yoinked ${d.cards} card(s) from ${target}`
 				: `${who} played ${prettyKey(d.action)} on ${target}'s ${prettyKey(d.kind)}`;
 		case "bodyswap":
-			return `${who} BodySwapped ${target}'s ${prettyKey(d.fromKind)} into ${prettyKey(d.toKind)}`;
+			return `${who} Body Swapped ${target}'s ${prettyKey(d.fromKind)} into ${prettyKey(d.toKind)}`;
 		case "challenge_played":
 			return `${who} challenged ${target} with ${prettyKey(d.challenge)}, guessing ${d.guess}`;
 		case "coin_flip":

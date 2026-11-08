@@ -3,6 +3,8 @@ import type { ChatRecord } from "./chatModeration";
 import { PACKS, normalizePacks } from "./deck";
 import { discordPlayerName as baseDiscordName } from "./playerName";
 import {
+	DEFAULT_RECONNECT_SECONDS,
+	DEFAULT_TURN_SECONDS,
 	GameState,
 	GameView,
 	LobbyView,
@@ -11,6 +13,8 @@ import {
 	PackId,
 	PlayerView,
 	PublicLobbyEntry,
+	RECONNECT_SECONDS_OPTIONS,
+	TURN_SECONDS_OPTIONS,
 } from "./types";
 
 export interface LobbyPlayer {
@@ -52,6 +56,9 @@ export interface Lobby {
 	streamerMode?: boolean;
 	// Recent chat, oldest first - capped so it stays small in Redis
 	chat?: ChatRecord[];
+	// Lobby settings - missing on lobbies saved before they existed, which get the defaults
+	turnSeconds?: number;
+	reconnectSeconds?: number;
 }
 
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -231,6 +238,29 @@ export class LobbyManager {
 	}
 
 	// Lobbies closest to filling up first (they'll start soonest), then the newest
+	setLobbyTimers(lobby: Lobby, timers: { turnSeconds?: unknown; reconnectSeconds?: unknown }): void {
+		if (lobby.game && !lobby.game.ended) throw new Error("Cannot change timers during a game.");
+		const { turnSeconds, reconnectSeconds } = timers;
+		if (turnSeconds !== undefined) {
+			if (!(TURN_SECONDS_OPTIONS as readonly unknown[]).includes(turnSeconds))
+				throw new Error("Invalid turn duration.");
+			lobby.turnSeconds = turnSeconds as number;
+		}
+		if (reconnectSeconds !== undefined) {
+			if (!(RECONNECT_SECONDS_OPTIONS as readonly unknown[]).includes(reconnectSeconds))
+				throw new Error("Invalid reconnect time.");
+			lobby.reconnectSeconds = reconnectSeconds as number;
+		}
+	}
+
+	turnSecondsOf(lobby: Lobby): number {
+		return lobby.turnSeconds ?? DEFAULT_TURN_SECONDS;
+	}
+
+	reconnectSecondsOf(lobby: Lobby): number {
+		return lobby.reconnectSeconds ?? DEFAULT_RECONNECT_SECONDS;
+	}
+
 	listPublicLobbies(search?: string, page = 0, pageSize = 10): LobbiesPage {
 		const q = (search ?? "").toLowerCase().trim();
 		const all: (PublicLobbyEntry & { createdAt: number })[] = [];
@@ -265,6 +295,8 @@ export class LobbyManager {
 	loadLobby(lobby: Lobby): void {
 		// Reset createdAt so removeEmptyLobbies allows time to reconnect
 		lobby.createdAt = Date.now();
+		// Lobbies saved before bots were kept online come back with them marked offline
+		for (const p of lobby.players) if (p.isBot) p.connected = true;
 		this.lobbies.set(lobby.code, lobby);
 	}
 
@@ -283,12 +315,28 @@ export class LobbyManager {
 		return lobby.players.splice(idx, 1)[0];
 	}
 
+	// The people who all have to vote before a coin flip is skipped: everyone in the game who's
+	// connected and not a bot. Bots never hold things up, and nobody waits on someone who's gone.
+	flipSkipVoters(lobby: Lobby): string[] {
+		const g = lobby.game;
+		if (!g) return [];
+		return lobby.players.filter((p) => !p.isBot && p.connected && g.players[p.id]).map((p) => p.id);
+	}
+
+	// Whether everyone who has to vote to skip the current coin flip has done so
+	flipSkipAgreed(lobby: Lobby): boolean {
+		const votes = lobby.game?.pendingChallenge?.skipVotes ?? [];
+		const voters = this.flipSkipVoters(lobby);
+		return voters.length > 0 && voters.every((id) => votes.includes(id));
+	}
+
 	viewFor(lobby: Lobby, viewerId: string | null): LobbyView {
 		const publicPlayers = lobby.players.map((p) => ({
 			id: p.id,
 			name: p.name,
-			connected: p.connected,
+			connected: p.connected || !!p.isBot,
 			isBot: p.isBot || false,
+			hasStats: !!p.discordId && !p.isBot,
 		}));
 
 		if (!lobby.game) {
@@ -301,11 +349,24 @@ export class LobbyManager {
 				isActivity: !!lobby.activityId,
 				packs: normalizePacks(lobby.packs),
 				streamerMode: !!lobby.streamerMode,
+				turnSeconds: this.turnSecondsOf(lobby),
+				reconnectSeconds: this.reconnectSecondsOf(lobby),
 			};
 		}
 
 		const g = lobby.game;
 		const pc = g.pendingChallenge;
+		// Skip-vote progress while the coin flip is showing
+		const voters = pc?.stage === "awaiting_reflip" ? this.flipSkipVoters(lobby) : [];
+		const votes = pc?.skipVotes ?? [];
+		const skip =
+			pc?.stage === "awaiting_reflip"
+				? {
+						skipVotes: voters.filter((id) => votes.includes(id)).length,
+						skipNeeded: voters.length,
+						skipVoted: !!viewerId && votes.includes(viewerId),
+					}
+				: {};
 
 		const playersView: PlayerView[] = g.order.map((pid) => {
 			const p = g.players[pid];
@@ -342,6 +403,7 @@ export class LobbyManager {
 					pc.stage === "awaiting_reflip" && pc.reflipDeadline
 						? Math.max(0, pc.reflipDeadline - Date.now())
 						: undefined,
+				...skip,
 			} : null,
 			log: g.log.slice(-40),
 			finalRoundActive: g.finalRoundActive,
@@ -351,6 +413,7 @@ export class LobbyManager {
 			challengeUsedThisTurn: g.challengeUsedThisTurn,
 			tutorialProgress:
 				g.phase === "tutorial" && g.tutorial ? { ...g.tutorial } : null,
+			turnMsLeft: g.turnDeadline && !g.ended ? Math.max(0, g.turnDeadline - Date.now()) : undefined,
 		};
 
 		return {
@@ -362,6 +425,8 @@ export class LobbyManager {
 			isActivity: !!lobby.activityId,
 			packs: normalizePacks(lobby.packs),
 			streamerMode: !!lobby.streamerMode,
+			turnSeconds: this.turnSecondsOf(lobby),
+			reconnectSeconds: this.reconnectSecondsOf(lobby),
 		};
 	}
 }

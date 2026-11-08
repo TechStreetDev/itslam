@@ -120,7 +120,7 @@ export const PACKS: Record<PackId, CardPack> = {
 	base: {
 		id: "base",
 		name: "Base Game",
-		description: "The cards from the original ITSLAM game.",
+		description: "Every card from the original ITSLAM card game by Zedaph. Always part of the deck.",
 		alwaysOn: true,
 		cards: [
 			...COLORS.flatMap((color) => sheepParts(color)),
@@ -137,7 +137,7 @@ export const PACKS: Record<PackId, CardPack> = {
 	expansion: {
 		id: "expansion",
 		name: "Expansion Pack",
-		description: "Extra cards shuffled in alongside the base game.",
+		description: "Extra cards shuffled in alongside the base game, for new twists in every round.",
 		hidden: true,
 		cards: [],
 	},

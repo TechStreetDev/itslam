@@ -102,7 +102,7 @@ export function createGame(
 		}
 	}
 
-	pushLog(game, "The flock has gathered.");
+	pushLog(game, "The game has been started.");
 	if (!tutorialPending(game)) beginFirstTurn(game);
 	return game;
 }
@@ -542,7 +542,7 @@ export function bodyswap(
 		});
 		pushLog(
 			game,
-			`${player.name} BodySwapped ${target.name}'s ${oldFrankenDesc} into a ${describeSheep(entity)}!`,
+			`${player.name} Body Swapped ${target.name}'s ${oldFrankenDesc} into a ${describeSheep(entity)}!`,
 		);
 		return;
 	}
@@ -592,12 +592,12 @@ export function bodyswap(
 		});
 		pushLog(
 			game,
-			`${player.name} BodySwapped ${target.name}'s ${oldSwapDesc} into a ${describeSheep(entity)}!`,
+			`${player.name} Body Swapped ${target.name}'s ${oldSwapDesc} into a ${describeSheep(entity)}!`,
 		);
 		return;
 	}
 
-	throw err("Only modified or Half Rainbow Sheep can be BodySwapped.");
+	throw err("Only modified or Half Rainbow Sheep can be Body Swapped.");
 }
 
 export function playChallenge(
@@ -676,6 +676,7 @@ export function playReflip(
 	pc.winnerId = winnerId;
 	pc.loserId = loserId;
 	pc.flipCount = (pc.flipCount ?? 1) + 1;
+	pc.skipVotes = [];
 	recordEvent(game, "coin_flip", {
 		actor: pc.challengerId,
 		target: pc.targetId,
@@ -755,6 +756,7 @@ export function resolveFlip(game: GameState, playerId: string): FlipResult {
 	pc.winnerId = winnerId;
 	pc.loserId = loserId;
 	pc.flipCount = 1;
+	pc.skipVotes = [];
 	recordEvent(game, "coin_flip", {
 		actor: pc.challengerId,
 		target: pc.targetId,
@@ -775,6 +777,20 @@ export function resolveFlip(game: GameState, playerId: string): FlipResult {
 		loserId,
 		challengeType: pc.challengeType,
 	};
+}
+
+export function noteTimeout(game: GameState, playerId: string) {
+	pushLog(game, `${game.players[playerId].name} ran out of time.`);
+}
+
+// A vote to end the Re-Flip window and lock the result in now. Voting also passes on your own
+// chance to Re-Flip. The server commits once everyone still here has voted.
+export function voteSkipFlip(game: GameState, playerId: string) {
+	const pc = game.pendingChallenge as PendingChallenge;
+	if (!pc || pc.stage !== "awaiting_reflip") throw err("There's no coin flip to skip.");
+	if (!game.players[playerId]) throw err("You're not in this game.");
+	pc.skipVotes ??= [];
+	if (!pc.skipVotes.includes(playerId)) pc.skipVotes.push(playerId);
 }
 
 export function commitFlipResult(game: GameState) {

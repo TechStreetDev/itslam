@@ -168,6 +168,7 @@ export function LandingScreen({
 	lobbiesPage,
 	error,
 	session,
+	initialCode,
 }: {
 	onCreate: (name: string) => void;
 	onJoin: (name: string, code: string) => void;
@@ -179,15 +180,17 @@ export function LandingScreen({
 	lobbiesPage: LobbiesPage | null;
 	error: string;
 	session: SessionInfo | null;
+	// From an invite link - opens on the Join tab with the code filled in
+	initialCode?: string;
 }) {
 	// Signed-in players play under their Discord name - the server picks it, this just shows it
 	const user = session?.user ?? null;
 	const discordName = user ? discordPlayerName(user.username) : null;
 	const [statsOpen, setStatsOpen] = useState(false);
 	const [name, setName] = useState("");
-	const [code, setCode] = useState("");
+	const [code, setCode] = useState(initialCode ?? "");
 	const [localError, setLocalError] = useState("");
-	const [tab, setTab] = useState<Tab>("create");
+	const [tab, setTab] = useState<Tab>(initialCode ? "join" : "create");
 	const [search, setSearch] = useState("");
 	const [browsePage, setBrowsePage] = useState(0);
 	const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(

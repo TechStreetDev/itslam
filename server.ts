@@ -18,12 +18,12 @@ import {
 	SessionUser,
 } from "./src/lib/auth";
 import { collectStats, track } from "./src/lib/stats";
-import { connectDb } from "./src/lib/db";
+import { connectDb, db } from "./src/lib/db";
 import { can, initRoles } from "./src/lib/roles";
 import { pruneLogins } from "./src/lib/logins";
 import { recordGame } from "./src/lib/gameRecorder";
 import { handleAdminApi, readJson, sendJson } from "./src/lib/adminApi";
-import { handlePlayerStatsApi } from "./src/lib/playerStats";
+import { handlePlayerStatsApi, playerHistory, playerSummary } from "./src/lib/playerStats";
 import { CHAT_MAX_LENGTH, QUICK_RESPONSES, REPORT_DETAILS_MAX, REPORT_REASONS, SessionInfo } from "./src/lib/types";
 import {
 	ChatRecord,
@@ -48,9 +48,11 @@ const pendingBotActions = new Set<string>();
 const pendingReflipTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const pendingResetTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-// How long a player who drops mid-game has to reconnect before a bot takes over
-const RECONNECT_GRACE_MS = 10000;
+// How long a player who drops mid-game has to reconnect before a bot takes over is a
+// lobby setting (reconnectSeconds)
 const pendingBotTakeovers = new Map<string, ReturnType<typeof setTimeout>>();
+// Each lobby's turn timer, and which turn it's counting down ("turnNumber:playerId")
+const turnTimers = new Map<Lobby, { turn: string; timer: ReturnType<typeof setTimeout> }>();
 
 // Chat: messages kept per lobby (also what a report saves as context), and how many
 // one socket can send per window
@@ -170,6 +172,7 @@ app.prepare().then(async () => {
 			disbandLobbyAll(lobby);
 			return;
 		}
+		syncTurnTimer(lobby);
 		for (const p of lobby.players) {
 			if (p.socketId && !p.isBot) {
 				io.to(p.socketId).emit(
@@ -188,6 +191,55 @@ app.prepare().then(async () => {
 			);
 		}
 		saveLobby(lobby);
+	}
+
+	function clearTurnTimer(lobby: Lobby) {
+		const t = turnTimers.get(lobby);
+		if (t) clearTimeout(t.timer);
+		turnTimers.delete(lobby);
+	}
+
+	// Keeps the turn timer counting down the right turn. A human's turn gets turnSeconds from
+	// when it starts; bots' turns, the tutorial and finished games have no timer.
+	function syncTurnTimer(lobby: Lobby) {
+		const g = lobby.game;
+		const pid = g?.started && !g.ended && g.phase !== "tutorial" ? engine.currentPlayerId(g) : null;
+		const human = pid ? lobbyManager.findPlayer(lobby, pid) : undefined;
+		// Turn duration 0 is "unlimited"
+		if (!g || !pid || !human || human.isBot || lobbyManager.turnSecondsOf(lobby) === 0) {
+			clearTurnTimer(lobby);
+			if (g) g.turnDeadline = g.turnDeadlineFor = undefined;
+			return;
+		}
+		const turn = `${g.turnNumber ?? 0}:${pid}`;
+		if (g.turnDeadlineFor !== turn || !g.turnDeadline) {
+			g.turnDeadlineFor = turn;
+			g.turnDeadline = Date.now() + lobbyManager.turnSecondsOf(lobby) * 1000;
+			g.turnTimeouts = 0;
+		}
+		if (turnTimers.get(lobby)?.turn === turn) return;
+		// Already ran out: retry once a Re-Flip window has closed, but never loop on a turn
+		// that can't be finished
+		const timeouts = g.turnTimeouts ?? 0;
+		if (timeouts > 0 && (g.pendingChallenge?.stage === "awaiting_reflip" || timeouts >= 3)) {
+			clearTurnTimer(lobby);
+			return;
+		}
+		clearTurnTimer(lobby);
+		const timer = setTimeout(() => {
+			turnTimers.delete(lobby);
+			if (lobbyManager.getLobby(lobby.code) !== lobby || lobby.game !== g) return;
+			if (g.turnDeadlineFor !== turn || g.ended) return;
+			try {
+				g.turnTimeouts = (g.turnTimeouts ?? 0) + 1;
+				if (g.turnTimeouts === 1) engine.noteTimeout(g, pid);
+				bot.forceTimedOutTurn(g, pid);
+			} catch (e) {
+				console.error("Turn timeout:", e);
+			}
+			broadcast(lobby);
+		}, Math.max(0, g.turnDeadline - Date.now()));
+		turnTimers.set(lobby, { turn, timer });
 	}
 
 	function clearReflipTimer(code: string) {
@@ -336,6 +388,8 @@ app.prepare().then(async () => {
 
 	function scheduleBotTakeover(lobby: Lobby, playerId: string) {
 		clearBotTakeover(playerId);
+		// Replacing disconnected players is turned off - their seat waits for them
+		if (lobbyManager.reconnectSecondsOf(lobby) === 0) return;
 		pendingBotTakeovers.set(
 			playerId,
 			setTimeout(() => {
@@ -346,7 +400,7 @@ app.prepare().then(async () => {
 				if (!lobby.game?.started || lobby.game.ended) return;
 				replaceWithBot(lobby, playerId);
 				broadcast(lobby);
-			}, RECONNECT_GRACE_MS),
+			}, lobbyManager.reconnectSecondsOf(lobby) * 1000),
 		);
 	}
 
@@ -383,6 +437,8 @@ app.prepare().then(async () => {
 			if (lobby.game.pendingChallenge?.stage === "awaiting_reflip")
 				startReflipTimer(lobby);
 			scheduleBotAction(lobby);
+			// Picks up the saved deadline, so a restart doesn't reset anyone's turn clock
+			syncTurnTimer(lobby);
 		}
 	}
 	if (storedLobbies.length > 0)
@@ -477,6 +533,31 @@ app.prepare().then(async () => {
 				socket.emit("error_msg", e.message || "Something went wrong.");
 			}
 		});
+
+		// Stats for someone in your lobby. Looked up here because Discord IDs are never sent to
+		// other players - you only ever ask for "this seat in my lobby".
+		socket.on(
+			"player_stats",
+			async (
+				{ playerId, part, page }: { playerId: string; part: "summary" | "history"; page?: number },
+				ack?: (res: unknown) => void,
+			) => {
+				const reply = typeof ack === "function" ? ack : () => {};
+				try {
+					const lobby = lobbyManager.getLobby(currentCode);
+					if (!lobby || !lobbyManager.findPlayer(lobby, currentPlayerId)) throw new Error("You're not in a lobby.");
+					const target = lobbyManager.findPlayer(lobby, playerId);
+					if (!target || target.isBot || !target.discordId)
+						throw new Error("Stats are only kept for players signed in with Discord.");
+					if (!db) throw new Error("Game history isn't enabled on this server.");
+					const p = Number.isInteger(page) && page! >= 0 ? page! : 0;
+					reply(part === "history" ? await playerHistory(target.discordId, p) : await playerSummary(target.discordId));
+				} catch (e) {
+					if (!(e instanceof Error) || (e as any).code) console.error("Player stats:", e);
+					reply({ error: (e as any)?.code ? "Couldn't load their stats - try again." : (e as Error).message });
+				}
+			},
+		);
 
 		socket.on(
 			"chat_report",
@@ -718,6 +799,15 @@ app.prepare().then(async () => {
 			}),
 		);
 
+		socket.on(
+			"set_timers",
+			(timers: { turnSeconds?: number; reconnectSeconds?: number } | undefined) =>
+				withLobby((lobby) => {
+					if (lobby.hostId !== currentPlayerId) throw new Error("Only the host can change timers.");
+					lobbyManager.setLobbyTimers(lobby, timers ?? {});
+				}),
+		);
+
 		socket.on("set_packs", ({ packs }: { packs: string[] }) =>
 			withLobby((lobby) => {
 				if (lobby.hostId !== currentPlayerId)
@@ -808,6 +898,20 @@ app.prepare().then(async () => {
 		socket.on("play_challenge", (payload: engine.PlayChallengePayload) =>
 			withLobby((lobby) => {
 				engine.playChallenge(lobby.game!, currentPlayerId!, payload);
+			}),
+		);
+
+		socket.on("vote_skip_flip", () =>
+			withLobby((lobby) => {
+				// Only the Re-Flip window can be skipped - not the coin landing
+				const deadline = lobby.game?.pendingChallenge?.reflipDeadline;
+				if (deadline && Date.now() < deadline - REFLIP_WINDOW_MS) return;
+				engine.voteSkipFlip(lobby.game!, currentPlayerId!);
+				// Everyone still here wants to move on - lock the result in now
+				if (lobbyManager.flipSkipAgreed(lobby)) {
+					clearReflipTimer(lobby.code);
+					engine.commitFlipResult(lobby.game!);
+				}
 			}),
 		);
 
@@ -902,7 +1006,7 @@ app.prepare().then(async () => {
 		socket.on("add_bot", () =>
 			withLobby((lobby) => {
 				if (!can(socketUser, "add_bots")) {
-					throw new Error("Only playtesters can add bots.");
+					throw new Error("Only admins can add bots.");
 				}
 
 				if (lobby.hostId !== currentPlayerId) {

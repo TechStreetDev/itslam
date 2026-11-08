@@ -7,13 +7,13 @@ import { Modal } from "@/components/Modal";
 
 type Row = Record<string, any>;
 
-interface Summary {
+export interface Summary {
 	games: number;
 	wins: number;
 	bestScore: number | null;
 }
 
-interface History {
+export interface History {
 	total: number;
 	page: number;
 	pageSize: number;
@@ -46,12 +46,23 @@ function fmtPlayTime(ms: number): string {
 const fmtDate = (s: string) =>
 	new Date(s).toLocaleString(undefined, { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
 
+// Where the stats come from - your own by default, or another player's
+export interface StatsLoader {
+	summary: () => Promise<Summary>;
+	history: (page: number) => Promise<History>;
+}
+
 async function get<T>(path: string): Promise<T> {
 	const res = await fetch(path, { headers: authHeaders() });
 	const json = await res.json().catch(() => ({}));
 	if (!res.ok) throw new Error(json.error || "Couldn't load your stats.");
 	return json as T;
 }
+
+const myStats: StatsLoader = {
+	summary: () => get<Summary>("/api/me/stats"),
+	history: (page) => get<History>(`/api/me/games?page=${page}`),
+};
 
 function StatTile({ label, value }: { label: string; value: React.ReactNode }) {
 	return (
@@ -62,22 +73,40 @@ function StatTile({ label, value }: { label: string; value: React.ReactNode }) {
 	);
 }
 
-export function StatsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+// name: whose stats these are, when they aren't yours (pass a loader for them too)
+export function StatsModal({
+	open,
+	onClose,
+	name,
+	loader = myStats,
+}: {
+	open: boolean;
+	onClose: () => void;
+	name?: string;
+	loader?: StatsLoader;
+}) {
 	const [summary, setSummary] = useState<Summary | null>(null);
 	const [history, setHistory] = useState<History | null>(null);
 	const [page, setPage] = useState(0);
 	const [error, setError] = useState("");
+	const mine = name === undefined;
 
+	// Opening it for someone else starts fresh, not on the last player's page
 	useEffect(() => {
 		if (!open) return;
+		setSummary(null);
+		setHistory(null);
+		setPage(0);
 		setError("");
-		get<Summary>("/api/me/stats").then(setSummary, (e) => setError(e.message));
-	}, [open]);
+		loader.summary().then(setSummary, (e) => setError(e.message));
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [open, name]);
 
 	useEffect(() => {
 		if (!open) return;
-		get<History>(`/api/me/games?page=${page}`).then(setHistory, (e) => setError(e.message));
-	}, [open, page]);
+		loader.history(page).then(setHistory, (e) => setError(e.message));
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [open, name, page]);
 
 	useEffect(() => {
 		if (!open) return;
@@ -102,7 +131,7 @@ export function StatsModal({ open, onClose }: { open: boolean; onClose: () => vo
 		>
 			<div className="flex items-center justify-between mb-4">
 				<h2 id="stats-title" className="font-display text-2xl text-[#7a3a58] tracking-wide font-extrabold">
-					My stats
+					{mine ? "My stats" : `${name}’s stats`}
 				</h2>
 				<button
 					onClick={onClose}
@@ -121,7 +150,9 @@ export function StatsModal({ open, onClose }: { open: boolean; onClose: () => vo
 				</div>
 			) : history.total === 0 ? (
 				<p className="text-[#8a5a70] font-semibold text-sm py-6 text-center leading-relaxed">
-					No games yet! Games you play while signed in with Discord will show up here.
+					{mine
+						? "No games yet! Games you play while signed in with Discord will show up here."
+						: `${name} hasn’t finished any games while signed in yet.`}
 				</p>
 			) : (
 				<>
@@ -153,7 +184,13 @@ export function StatsModal({ open, onClose }: { open: boolean; onClose: () => vo
 									<div className="flex-1 min-w-0">
 										<div className="flex items-baseline justify-between gap-2">
 											<p className="font-extrabold text-[13px] text-[#3d1a2c]">
-												{!finished ? "Unfinished game" : place === 1 ? "You won!" : `You came ${ordinal(place!)}`}
+												{!finished
+													? "Unfinished game"
+													: place === 1
+														? mine
+															? "You won!"
+															: "Won"
+														: `${mine ? "You came" : "Came"} ${ordinal(place!)}`}
 												{g.was_replaced ? <span className="text-[#9a7888] font-bold"> · left early</span> : null}
 											</p>
 											<p className="text-[11px] font-bold text-[#9a7888] whitespace-nowrap">{fmtDate(g.started_at)}</p>
@@ -172,7 +209,7 @@ export function StatsModal({ open, onClose }: { open: boolean; onClose: () => vo
 														{finished && p.placement ? ordinal(p.placement) : "-"}
 													</span>
 													<span className="flex-1 truncate">
-														{p.you ? "You" : p.is_bot ? "Bot" : (p.username ?? "Guest")}
+														{p.you && mine ? "You" : p.is_bot ? "Bot" : (p.username ?? "Guest")}
 													</span>
 													<span className="tabular-nums">{p.score ?? ""}</span>
 												</li>

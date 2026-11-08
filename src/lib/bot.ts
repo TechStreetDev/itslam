@@ -217,3 +217,28 @@ export function resolveBotChallengeEffect(game: GameState, botId: string): boole
 	}
 	return true;
 }
+
+// Plays out the rest of a turn whose timer ran out: makes whoever a challenge is waiting on
+// act, draws if they hadn't, then ends the turn (discarding down to 7 like a bot would).
+// Returns false while a Re-Flip window is open - call again once it closes.
+export function forceTimedOutTurn(game: GameState, playerId: string): boolean {
+	// A few steps at most: finish a challenge, draw, end the turn
+	for (let step = 0; step < 6; step++) {
+		if (game.ended || engine.currentPlayerId(game) !== playerId) return true;
+		const pc = game.pendingChallenge;
+		if (pc) {
+			if (pc.stage === "awaiting_reflip") return false;
+			if (pc.stage === "awaiting_flip") {
+				if (pc.guess === null) doBotReGuess(game, pc.challengerId);
+				else doBotFlip(game, pc.targetId);
+			} else resolveBotChallengeEffect(game, pc.winnerId!);
+			continue;
+		}
+		if (game.phase === "draw") doBotDrawPhase(game, playerId);
+		else if (game.phase === "play" || game.phase === "discard") {
+			doBotEndTurn(game, playerId);
+			return true;
+		} else return true;
+	}
+	return true;
+}

@@ -29,6 +29,7 @@ import { Modal } from "./Modal";
 import { useExitAnimation } from "@/hooks/useExitAnimation";
 import { DevPanel } from "./DevPanel";
 import { TutorialVideo } from "./TutorialVideo";
+import { LogText } from "./LogText";
 
 type Pending =
 	| { kind: "await_wheat_sheep"; card: ActionCard }
@@ -174,6 +175,7 @@ export function GameScreen({
 	}, [myHand, handOrder]);
 	const opponents = game.players.filter((p) => p.id !== myId);
 	const isMyTurn = game.currentPlayerId === myId;
+	const turnLeft = useTurnCountdown(game.turnMsLeft);
 	// Final phase of the turn: picking cards to get back down to 7
 	const discardMode = isMyTurn && game.phase === "discard" && !game.ended;
 	const discardNeed = Math.max(0, myHand.length - 7);
@@ -478,9 +480,9 @@ export function GameScreen({
 							{group.entries.map((entry, i) => (
 								<li
 									key={i}
-									className="py-1.5 border-b border-[#f5d0e8] last:border-b-0 text-sm text-[#8a5a70] font-semibold"
+									className="py-1.5 border-b border-[#f5d0e8] last:border-b-0 text-sm text-[#9a7888] font-semibold leading-relaxed"
 								>
-									{entry.text}
+									<LogText text={entry.text} players={game.players} />
 								</li>
 							))}
 						</ul>
@@ -665,6 +667,14 @@ export function GameScreen({
 									: isMyTurn
 										? "It's your turn!"
 										: `${game.players.find((p) => p.id === game.currentPlayerId)?.name}'s turn`}
+							{!game.ended && !tutorial && turnLeft !== null && (
+								<span
+									title="Time left before this turn ends automatically"
+									className={`ml-2 tabular-nums ${turnLeft <= 30_000 ? "text-[#ffd0d6]" : "opacity-75"}`}
+								>
+									{fmtClock(turnLeft)}
+								</span>
+							)}
 						</span>
 					</div>
 					<div className="flex items-center gap-3">
@@ -1118,6 +1128,30 @@ export function GameScreen({
 			)}
 		</div>
 	);
+}
+
+// Time left on the current turn, ticking locally from what the server last sent (so the
+// clocks don't need to agree). null when no timer is running.
+function useTurnCountdown(msLeft: number | undefined): number | null {
+	const [left, setLeft] = useState<number | null>(null);
+	useEffect(() => {
+		if (msLeft === undefined) {
+			setLeft(null);
+			return;
+		}
+		const end = Date.now() + msLeft;
+		const tick = () => setLeft(Math.max(0, end - Date.now()));
+		tick();
+		const interval = setInterval(tick, 500);
+		return () => clearInterval(interval);
+	}, [msLeft]);
+	return left;
+}
+
+// 125000 -> "2:05"
+function fmtClock(ms: number): string {
+	const s = Math.ceil(ms / 1000);
+	return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
 // Consecutive log entries from the same turn, oldest first

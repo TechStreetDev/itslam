@@ -8,7 +8,13 @@ import {
 	useSyncExternalStore,
 } from "react";
 import { io, Socket } from "socket.io-client";
-import { ChatMessage, LobbiesPage, LobbyView, PackId, SessionInfo } from "@/lib/types";
+import {
+	ChatMessage,
+	LobbiesPage,
+	LobbyView,
+	PackId,
+	SessionInfo,
+} from "@/lib/types";
 import { onAuth } from "@/lib/signIn";
 import {
 	getServerTabStatus,
@@ -37,7 +43,8 @@ export interface ToastItem {
 	error?: boolean;
 }
 
-export function useFlockSocket() {
+// joinCode: from an invite link - joining that lobby wins over rejoining the last one
+export function useFlockSocket(joinCode?: string) {
 	const socketRef = useRef<Socket | null>(null);
 	const [state, setState] = useState<LobbyView | null>(null);
 	const [lobbiesPage, setLobbiesPage] = useState<LobbiesPage | null>(null);
@@ -93,6 +100,14 @@ export function useFlockSocket() {
 		savedCodeRef.current = activity
 			? ""
 			: localStorage.getItem("flock_code") || "";
+		if (
+			joinCode &&
+			savedCodeRef.current &&
+			savedCodeRef.current !== joinCode.toUpperCase()
+		) {
+			localStorage.removeItem("flock_code");
+			savedCodeRef.current = "";
+		}
 
 		const socket = io({
 			path: "/socket.io",
@@ -159,7 +174,9 @@ export function useFlockSocket() {
 		socket.on("session", setSession);
 		socket.on("chat_history", (history: ChatMessage[]) => {
 			setChat(history);
-			setChatHistoryTs(history.length ? history[history.length - 1].ts : 0);
+			setChatHistoryTs(
+				history.length ? history[history.length - 1].ts : 0,
+			);
 		});
 		socket.on("chat", (msg: ChatMessage) =>
 			setChat((c) => [...c, msg].slice(-100)),
@@ -203,7 +220,7 @@ export function useFlockSocket() {
 			setSession(null);
 			setChat([]);
 		};
-	}, [toast, tabStatus, activityMode, activity]);
+	}, [toast, tabStatus, activityMode, activity, joinCode]);
 
 	// A popup sign-in upgrades the live socket in place - no reconnect, so nobody's
 	// seat flickers offline mid-game
@@ -211,7 +228,9 @@ export function useFlockSocket() {
 		() =>
 			onAuth((result) => {
 				if (result.ok && result.token) {
-					socketRef.current?.emit("authenticate", { token: result.token });
+					socketRef.current?.emit("authenticate", {
+						token: result.token,
+					});
 					toast(`Signed in as ${result.user?.username ?? "you"}`);
 				} else {
 					toast("Discord sign-in didn't work - try again.", true);
@@ -233,7 +252,11 @@ export function useFlockSocket() {
 
 	// Resolves with an error message, or null once the report is saved
 	const reportChat = useCallback(
-		async (messageId: string, reason: string, details: string): Promise<string | null> => {
+		async (
+			messageId: string,
+			reason: string,
+			details: string,
+		): Promise<string | null> => {
 			const socket = socketRef.current;
 			if (!socket) return "Not connected - try again in a moment.";
 			try {
@@ -244,6 +267,30 @@ export function useFlockSocket() {
 			} catch {
 				return "Couldn't reach the server - try again.";
 			}
+		},
+		[],
+	);
+
+	// Stats for another player in your lobby - the server looks up their account
+	const playerStats = useCallback(
+		async <T>(
+			playerId: string,
+			part: "summary" | "history",
+			page = 0,
+		): Promise<T> => {
+			const socket = socketRef.current;
+			if (!socket)
+				throw new Error("Not connected - try again in a moment.");
+			let res: any;
+			try {
+				res = await socket
+					.timeout(10000)
+					.emitWithAck("player_stats", { playerId, part, page });
+			} catch {
+				throw new Error("Couldn't reach the server - try again.");
+			}
+			if (res?.error) throw new Error(res.error);
+			return res as T;
 		},
 		[],
 	);
@@ -322,10 +369,18 @@ export function useFlockSocket() {
 		[emit],
 	);
 
+	const setTimers = useCallback(
+		(timers: { turnSeconds?: number; reconnectSeconds?: number }) => {
+			emit("set_timers", timers);
+		},
+		[emit],
+	);
+
 	const setStreamerMode = useCallback(
 		(enabled: boolean) => {
 			emit("set_streamer_mode", { enabled });
-		}, [emit],
+		},
+		[emit],
 	);
 
 	const regenerateCode = useCallback(() => {
@@ -355,6 +410,7 @@ export function useFlockSocket() {
 		setPublic,
 		setPacks,
 		setStreamerMode,
+		setTimers,
 		regenerateCode,
 		kickPlayer,
 		session,
@@ -363,5 +419,6 @@ export function useFlockSocket() {
 		sendChat,
 		sendQuickChat,
 		reportChat,
+		playerStats,
 	};
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useFlockSocket } from "@/hooks/useFlockSocket";
 import { getPip, setActivityPresence, subscribePip } from "@/lib/discordActivity";
 import { LobbyView, MAX_PLAYERS } from "@/lib/types";
@@ -9,6 +9,7 @@ import { LobbyScreen } from "@/components/LobbyScreen";
 import { GameScreen } from "@/components/GameScreen";
 import { ActivityPreview } from "@/components/ActivityPreview";
 import { ChatWidget, useChatState } from "@/components/ChatWidget";
+import { clearInvite, readInvite } from "@/lib/invite";
 
 const panelClass =
 	"bg-[#fff0f5] rounded-[22px] shadow-[0_6px_18px_rgba(130,50,90,0.18)] p-9 max-w-[420px] w-full text-center border-[3px] border-white";
@@ -24,6 +25,10 @@ function presenceFor(state: LobbyView | null) {
 }
 
 export function GameClient() {
+	// Code from an invite link - /join/CODE stashes it and sends the visitor here
+	const [joinCode] = useState(readInvite);
+	useEffect(() => clearInvite(), []);
+
 	const {
 		state,
 		connected,
@@ -46,6 +51,7 @@ export function GameClient() {
 		setPublic,
 		setPacks,
 		setStreamerMode,
+		setTimers,
 		regenerateCode,
 		kickPlayer,
 		session,
@@ -54,7 +60,8 @@ export function GameClient() {
 		sendChat,
 		sendQuickChat,
 		reportChat,
-	} = useFlockSocket();
+		playerStats,
+	} = useFlockSocket(joinCode);
 	const chatState = useChatState(chat, myId, chatHistoryTs);
 	const chatEnabled = !!session;
 
@@ -170,6 +177,7 @@ export function GameClient() {
 				<LandingScreen
 					onCreate={createLobby}
 					onJoin={joinLobby}
+					initialCode={joinCode}
 					onBrowse={listLobbies}
 					lobbiesPage={lobbiesPage}
 					error={landingError}
@@ -187,9 +195,10 @@ export function GameClient() {
 					onSetPublic={setPublic}
 					onSetPacks={setPacks}
 					onSetStreamerMode={setStreamerMode}
+					onSetTimers={setTimers}
 					onRegenerateCode={regenerateCode}
 					onKick={kickPlayer}
-					signedIn={!!session?.user}
+					onLoadStats={playerStats}
 				/>
 			)}
 

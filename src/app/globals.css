@@ -396,3 +396,95 @@ html, body {
         animation: drawer-fade 0.2s ease-out;
     }
 }
+
+/* Lobby player list: rows open up as players join and close as they leave, so the rest of
+   the panel slides instead of jumping. Joining opens the gap then fades the card in; leaving
+   fades the card out first, then closes the gap - so a card is never seen half cut off.
+   56px = a 48px card plus its 8px spacing. */
+@keyframes seat-in {
+    0% {
+        max-height: 0;
+        opacity: 0;
+        transform: scale(0.97);
+    }
+    55% {
+        max-height: 56px;
+        opacity: 0;
+        transform: scale(0.97);
+    }
+    100% {
+        max-height: 56px;
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@keyframes seat-out {
+    0% {
+        max-height: 56px;
+        opacity: 1;
+        transform: none;
+    }
+    45% {
+        max-height: 56px;
+        opacity: 0;
+        transform: scale(0.97);
+    }
+    100% {
+        max-height: 0;
+        opacity: 0;
+        transform: scale(0.97);
+    }
+}
+
+/* Timing matches the usePresence duration in LobbyScreen (300ms) */
+.seat-in {
+    overflow: hidden;
+    animation: seat-in 0.3s ease-in-out;
+}
+
+.seat-out {
+    overflow: hidden;
+    pointer-events: none;
+    animation: seat-out 0.3s ease-in-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .seat-in {
+        animation: drawer-fade 0.2s ease-out;
+    }
+
+    .seat-out {
+        animation: drawer-fade-out 0.2s ease-in forwards;
+    }
+}
+
+/* A player taking the add-bot seat's place: fade only, no resize */
+.seat-fade {
+    animation: drawer-fade 0.22s ease-out;
+}
+
+/* The add-bot seat coming back as someone leaves a full lobby: it opens over exactly the
+   stretch that the leaving row closes (45% onwards, same easing), so the panel holds still */
+@keyframes seat-swap-in {
+    0%,
+    45% {
+        max-height: 0;
+        opacity: 0;
+    }
+    100% {
+        max-height: 56px;
+        opacity: 1;
+    }
+}
+
+.seat-swap-in {
+    overflow: hidden;
+    animation: seat-swap-in 0.3s ease-in-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .seat-swap-in {
+        animation: drawer-fade 0.2s ease-out;
+    }
+}

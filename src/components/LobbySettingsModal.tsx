@@ -1,11 +1,108 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Lock, Star } from "lucide-react";
-import { LobbyView, MAX_PLAYERS, PackId } from "@/lib/types";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Ban, Lock, Star } from "lucide-react";
+import {
+	LobbyView,
+	PackId,
+	RECONNECT_SECONDS_OPTIONS,
+	TURN_SECONDS_OPTIONS,
+} from "@/lib/types";
 import { PACKS, PACK_ORDER, packCardCount } from "@/lib/deck";
-import { authHeaders } from "@/lib/discordActivity";
 import { Modal } from "@/components/Modal";
+
+// 120 -> "2 min", 30 -> "30s"
+const fmtSeconds = (s: number) =>
+	s >= 60 && s % 60 === 0 ? `${s / 60} min` : `${s}s`;
+
+// A row of choices, one selected - like a segmented control
+function OptionPicker({
+	options,
+	value,
+	disabled,
+	onChange,
+	label,
+	offLabel,
+	offIcon,
+}: {
+	options: readonly number[];
+	value: number;
+	disabled?: boolean;
+	onChange: (value: number) => void;
+	label: string;
+	// What the 0 option is called, e.g. "Disabled", and optionally an icon to show instead
+	offLabel: string;
+	offIcon?: React.ReactNode;
+}) {
+	// The selected pill is one element that slides to whichever option is chosen
+	const buttons = useRef<(HTMLButtonElement | null)[]>([]);
+	const [pill, setPill] = useState<{
+		left: number;
+		top: number;
+		width: number;
+		height: number;
+	} | null>(null);
+	const index = options.indexOf(value);
+	useLayoutEffect(() => {
+		const measure = () => {
+			const el = buttons.current[index];
+			setPill(
+				el
+					? {
+							left: el.offsetLeft,
+							top: el.offsetTop,
+							width: el.offsetWidth,
+							height: el.offsetHeight,
+						}
+					: null,
+			);
+		};
+		measure();
+		// The modal can change width while open
+		window.addEventListener("resize", measure);
+		return () => window.removeEventListener("resize", measure);
+	}, [index]);
+
+	return (
+		<div
+			role="radiogroup"
+			aria-label={label}
+			className="relative flex gap-1 bg-[#fbeaf3] rounded-lg p-1 mt-2"
+		>
+			{pill && (
+				<span
+					aria-hidden="true"
+					className={`absolute rounded-md shadow-sm transition-all duration-200 ease-out motion-reduce:transition-none ${
+						disabled ? "bg-[#b5a8ae]" : "bg-[#c05090]"
+					}`}
+					style={pill}
+				/>
+			)}
+			{options.map((o, i) => (
+				<button
+					key={o}
+					ref={(el) => {
+						buttons.current[i] = el;
+					}}
+					type="button"
+					role="radio"
+					aria-checked={o === value}
+					aria-label={o === 0 ? offLabel : undefined}
+					title={o === 0 ? offLabel : undefined}
+					disabled={disabled}
+					onClick={() => onChange(o)}
+					className={`relative flex-1 min-w-0 px-1.5 py-1 rounded-md whitespace-nowrap text-[12px] font-extrabold transition-colors duration-200 disabled:cursor-not-allowed ${
+						o === value
+							? "text-white"
+							: "text-[#9a7888] enabled:hover:text-[#7a3a58] enabled:hover:bg-white/70"
+					}`}
+				>
+					{o === 0 ? (offIcon ?? offLabel) : fmtSeconds(o)}
+				</button>
+			))}
+		</div>
+	);
+}
 
 function Toggle({
 	on,
@@ -38,7 +135,13 @@ function Toggle({
 			<span
 				className={`absolute top-1 left-1 w-5 h-5 rounded-full shadow transition-transform flex items-center justify-center ${disabled ? "bg-[#f3eff1]" : "bg-white"} ${on ? "translate-x-5" : ""}`}
 			>
-				{disabled && <Lock size={11} strokeWidth={3} className="text-[#9a8f94]" />}
+				{disabled && (
+					<Lock
+						size={11}
+						strokeWidth={3}
+						className="text-[#9a8f94]"
+					/>
+				)}
 			</span>
 		</button>
 	);
@@ -52,7 +155,8 @@ export function LobbySettingsModal({
 	onSetPublic,
 	onSetPacks,
 	onSetStreamerMode,
-	onAddBot,
+	onSetTimers,
+	canUseHidden,
 }: {
 	open: boolean;
 	state: LobbyView;
@@ -61,19 +165,13 @@ export function LobbySettingsModal({
 	onSetPublic: (isPublic: boolean) => void;
 	onSetPacks: (packs: PackId[]) => void;
 	onSetStreamerMode: (enabled: boolean) => void;
-	onAddBot: () => void;
+	onSetTimers: (timers: {
+		turnSeconds?: number;
+		reconnectSeconds?: number;
+	}) => void;
+	// Playtesters can see and switch on hidden card packs
+	canUseHidden: boolean;
 }) {
-	const lobbyFull = state.players.length >= MAX_PLAYERS;
-	const [permissions, setPermissions] = useState<string[]>([]);
-	useEffect(() => {
-		fetch("/api/me", { headers: authHeaders() })
-			.then((r) => r.json())
-			.then((me) => setPermissions(me.user?.permissions ?? []))
-			.catch(() => {});
-	}, []);
-	const canUseHidden = permissions.includes("hidden_packs");
-	const canAddBot = canEdit && permissions.includes("add_bots");
-
 	useEffect(() => {
 		if (!open) return;
 		const onKey = (e: KeyboardEvent) => {
@@ -85,7 +183,11 @@ export function LobbySettingsModal({
 
 	const togglePack = (id: PackId) => {
 		const enabled = state.packs.includes(id);
-		onSetPacks(enabled ? state.packs.filter((p) => p !== id) : [...state.packs, id]);
+		onSetPacks(
+			enabled
+				? state.packs.filter((p) => p !== id)
+				: [...state.packs, id],
+		);
 	};
 
 	return (
@@ -95,7 +197,7 @@ export function LobbySettingsModal({
 			backdropClassName="bg-[rgba(74,50,32,0.35)]"
 			className="z-[70] p-6"
 			labelledBy="lobby-settings-title"
-			panelClassName="bg-[#fff0f5] rounded-[22px] shadow-[0_6px_18px_rgba(130,50,90,0.18)] p-7 max-w-[440px] w-full text-left border-[3px] border-white max-h-[90vh] overflow-y-auto"
+			panelClassName="bg-[#fff0f5] rounded-[22px] shadow-[0_6px_18px_rgba(130,50,90,0.18)] p-7 max-w-[440px] md:max-w-[760px] w-full text-left border-[3px] border-white max-h-[90vh] overflow-y-auto"
 		>
 			<div className="flex items-center justify-between mb-4">
 				<h2
@@ -119,17 +221,19 @@ export function LobbySettingsModal({
 				</p>
 			)}
 
-			{!state.isActivity && (
-				<>
-					<h3 className="uppercase tracking-wide font-extrabold text-[#8a5a70] text-xs mb-2">
-						Visibility
-					</h3>
-					<div className="bg-white rounded-xl px-4 py-3 border-2 border-[#f5d0e8] flex items-center justify-between gap-3 mb-2">
+			<h3 className="uppercase tracking-wide font-extrabold text-[#8a5a70] text-xs mb-2">
+				Settings
+			</h3>
+			<div className="grid md:grid-cols-2 gap-2 mb-5">
+				{!state.isActivity && (
+					<div className="bg-white rounded-xl px-4 py-3 border-2 border-[#f5d0e8] flex items-center justify-between gap-3">
 						<div>
-							<div className="font-bold text-[#5a3048]">Public lobby</div>
+							<div className="font-bold text-[#5a3048]">
+								Public lobby
+							</div>
 							<div className="text-[12px] font-semibold text-[#9a7888]">
-								List this lobby in the lobby browser so anyone can join.
-								Turning it off gives the lobby a new code.
+								Anyone can find and join it from the lobby
+								browser. Turning it off changes the code.
 							</div>
 						</div>
 						<Toggle
@@ -139,64 +243,87 @@ export function LobbySettingsModal({
 							label="Public lobby"
 						/>
 					</div>
-					<div className="bg-white rounded-xl px-4 py-3 border-2 border-[#f5d0e8] flex items-center justify-between gap-3 mb-5">
+				)}
+				{!state.isActivity && (
+					<div className="bg-white rounded-xl px-4 py-3 border-2 border-[#f5d0e8] flex items-center justify-between gap-3">
 						<div>
-							<div className="font-bold text-[#5a3048]">Streamer mode</div>
+							<div className="font-bold text-[#5a3048]">
+								Streamer mode
+							</div>
 							<div className="text-[12px] font-semibold text-[#9a7888]">
-								Blur the lobby code on everyone's screen. Players can
-								still click it to copy.
+								Blurs the lobby code so it won't leak on stream.
+								Players can still click it to copy.
 							</div>
 						</div>
 						<Toggle
 							on={state.streamerMode}
 							disabled={!canEdit}
-							onChange={() => onSetStreamerMode(!state.streamerMode)}
+							onChange={() =>
+								onSetStreamerMode(!state.streamerMode)
+							}
 							label="Streamer mode"
 						/>
 					</div>
-				</>
-			)}
-
-			{canAddBot && (
-				<>
-					<h3 className="uppercase tracking-wide font-extrabold text-[#8a5a70] text-xs mb-2">
-						Players
-					</h3>
-					<div className="bg-white rounded-xl px-4 py-3 border-2 border-[#f5d0e8] flex items-center justify-between gap-3 mb-5">
-						<div>
-							<div className="font-bold text-[#5a3048] flex items-center gap-1.5">
-								Bots
-								<span
-									title="Playtester feature - only playtesters can see this"
-									aria-label="Playtester feature"
-									className="text-[#f0c419] bg-[#fff4c2] rounded-full p-1"
-								>
-									<Star size={12} fill="currentColor" />
-								</span>
-							</div>
-							<div className="text-[12px] font-semibold text-[#9a7888]">
-								{lobbyFull
-									? `The lobby is full (${MAX_PLAYERS} players max).`
-									: "Fill an empty seat with a computer player."}
-							</div>
-						</div>
-						<button
-							type="button"
-							onClick={onAddBot}
-							disabled={lobbyFull}
-							className="shrink-0 h-7 px-3 rounded-full bg-[#c05090] text-white text-[13px] font-extrabold hover:brightness-105 active:translate-y-px transition disabled:opacity-60 disabled:cursor-not-allowed"
-						>
-							+ Add
-						</button>
+				)}
+				<div className="bg-white rounded-xl px-4 py-3 border-2 border-[#f5d0e8] flex flex-col">
+					<div className="font-bold text-[#5a3048]">
+						Turn duration
 					</div>
-				</>
-			)}
+					<div className="flex-1 text-[12px] font-semibold text-[#9a7888]">
+						When time runs out, the players turn ends automatically
+						and play moves on to the next player.
+					</div>
+					<OptionPicker
+						label="Turn duration"
+						offLabel="Disabled"
+						offIcon={
+							<Ban
+								size={14}
+								strokeWidth={2.75}
+								className="inline-block align-[-2px]"
+							/>
+						}
+						options={TURN_SECONDS_OPTIONS}
+						value={state.turnSeconds}
+						disabled={!canEdit}
+						onChange={(turnSeconds) => onSetTimers({ turnSeconds })}
+					/>
+				</div>
+				<div className="bg-white rounded-xl px-4 py-3 border-2 border-[#f5d0e8] flex flex-col">
+					<div className="font-bold text-[#5a3048]">
+						Replace disconnected players
+					</div>
+					<div className="flex-1 text-[12px] font-semibold text-[#9a7888]">
+						How long before a bot takes over a disconnected players
+						seat. The player can take it back by rejoining.
+					</div>
+					<OptionPicker
+						label="Replace disconnected players after"
+						offLabel="Disabled"
+						offIcon={
+							<Ban
+								size={14}
+								strokeWidth={2.75}
+								className="inline-block align-[-2px]"
+							/>
+						}
+						options={RECONNECT_SECONDS_OPTIONS}
+						value={state.reconnectSeconds}
+						disabled={!canEdit}
+						onChange={(reconnectSeconds) =>
+							onSetTimers({ reconnectSeconds })
+						}
+					/>
+				</div>
+			</div>
 
 			<h3 className="uppercase tracking-wide font-extrabold text-[#8a5a70] text-xs mb-2">
 				Card packs
 			</h3>
-			<ul className="flex flex-col gap-2">
-				{PACK_ORDER.filter((id) => !PACKS[id].hidden || canUseHidden).map((id) => {
+			<ul className="grid md:grid-cols-2 gap-2">
+				{PACK_ORDER.filter(
+					(id) => !PACKS[id].hidden || canUseHidden,
+				).map((id) => {
 					const pack = PACKS[id];
 					const count = packCardCount(id);
 					const enabled = state.packs.includes(id);
@@ -223,7 +350,10 @@ export function LobbySettingsModal({
 											aria-label="Playtest pack"
 											className="text-[#f0c419] bg-[#fff4c2] rounded-full p-1"
 										>
-											<Star size={12} fill="currentColor" />
+											<Star
+												size={12}
+												fill="currentColor"
+											/>
 										</span>
 									)}
 								</div>
