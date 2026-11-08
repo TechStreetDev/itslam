@@ -374,3 +374,25 @@ html, body {
 .opponents-scroll::-webkit-scrollbar-thumb {
     background: #7a3a58;
 }
+
+/* Landing page: a tab's content settling in when you switch to it */
+@keyframes tab-fade {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+.tab-fade {
+    animation: tab-fade 0.22s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tab-fade {
+        animation: drawer-fade 0.2s ease-out;
+    }
+}

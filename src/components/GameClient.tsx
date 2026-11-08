@@ -173,6 +173,7 @@ export function GameClient() {
 					onBrowse={listLobbies}
 					lobbiesPage={lobbiesPage}
 					error={landingError}
+					session={session}
 				/>
 			)}
 
@@ -188,6 +189,7 @@ export function GameClient() {
 					onSetStreamerMode={setStreamerMode}
 					onRegenerateCode={regenerateCode}
 					onKick={kickPlayer}
+					signedIn={!!session?.user}
 				/>
 			)}
 

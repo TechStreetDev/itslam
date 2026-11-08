@@ -6,6 +6,7 @@ import { LobbyView, PackId } from "@/lib/types";
 import { PACKS } from "@/lib/deck";
 import { SiteFooter } from "@/components/SiteFooter";
 import { LobbySettingsModal } from "@/components/LobbySettingsModal";
+import { StatsModal } from "@/components/StatsModal";
 
 export function LobbyScreen({
 	state,
@@ -18,6 +19,7 @@ export function LobbyScreen({
 	onSetStreamerMode,
 	onRegenerateCode,
 	onKick,
+	signedIn,
 }: {
 	state: LobbyView;
 	myId: string;
@@ -29,9 +31,11 @@ export function LobbyScreen({
 	onSetStreamerMode: (enabled: boolean) => void;
 	onRegenerateCode: () => void;
 	onKick: (targetId: string) => void;
+	signedIn: boolean;
 }) {
 	const iAmHost = state.hostId === myId;
 	const [settingsOpen, setSettingsOpen] = useState(false);
+	const [statsOpen, setStatsOpen] = useState(false);
 	const [copied, setCopied] = useState(false);
 	const copiedTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 	useEffect(() => () => clearTimeout(copiedTimer.current), []);
@@ -159,12 +163,19 @@ export function LobbyScreen({
 						{state.packs.map((id) => PACKS[id].name).join(" + ")}
 					</span>
 				</button>
-				<button
-					onClick={onLeave}
-					className="text-[#8a5a70] font-bold underline text-sm"
-				>
-					Leave lobby
-				</button>
+				<div className="flex items-center justify-center gap-4">
+					{signedIn && (
+						<button onClick={() => setStatsOpen(true)} className="text-[#c05090] font-bold underline text-sm">
+							My stats
+						</button>
+					)}
+					<button
+						onClick={onLeave}
+						className="text-[#8a5a70] font-bold underline text-sm"
+					>
+						Leave lobby
+					</button>
+				</div>
 			</div>
 			<SiteFooter />
 			<LobbySettingsModal
@@ -177,6 +188,7 @@ export function LobbyScreen({
 				onSetStreamerMode={onSetStreamerMode}
 				onAddBot={onAddBot}
 			/>
+			{signedIn && <StatsModal open={statsOpen} onClose={() => setStatsOpen(false)} />}
 		</section>
 	);
 }

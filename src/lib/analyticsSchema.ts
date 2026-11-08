@@ -203,4 +203,6 @@ export interface Filters {
 	bots?: "any" | "none" | "some";
 	visibility?: "any" | "public" | "private";
 	packs?: string;
+	// Discord account ID - only games that signed-in player was in (set by the Players tab)
+	player?: string;
 }

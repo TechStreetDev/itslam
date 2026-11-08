@@ -91,10 +91,11 @@ type RoleRow = {
 	by_avatar: string | null;
 };
 
-export async function listRoles(): Promise<RoleEntry[]> {
+// Everyone with a role, or just one person's entry when discordId is given
+export async function listRoles(discordId?: string): Promise<RoleEntry[]> {
 	const envIds = envAdminIds();
 	if (!db) {
-		return [...envIds].map((id) => ({
+		return [...envIds].filter((id) => !discordId || id === discordId).map((id) => ({
 			user: { id, username: null, avatar: null },
 			roles: ["admin"],
 			addedBy: null,
@@ -107,7 +108,9 @@ export async function listRoles(): Promise<RoleEntry[]> {
 		`SELECT r.discord_id, r.roles, r.username, r.avatar, r.last_login_at, r.added_by, r.created_at,
 			b.username AS by_username, b.avatar AS by_avatar
 		FROM user_roles r LEFT JOIN user_roles b ON b.discord_id = r.added_by
+		${discordId ? "WHERE r.discord_id = ?" : ""}
 		ORDER BY r.created_at`,
+		discordId ? [discordId] : [],
 	);
 	return (rows as RoleRow[]).map((r) => ({
 		user: { id: r.discord_id, username: r.username, avatar: r.avatar },

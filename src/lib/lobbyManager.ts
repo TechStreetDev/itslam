@@ -1,6 +1,7 @@
 import * as engine from "./engine";
 import type { ChatRecord } from "./chatModeration";
 import { PACKS, normalizePacks } from "./deck";
+import { discordPlayerName as baseDiscordName } from "./playerName";
 import {
 	GameState,
 	GameView,
@@ -20,6 +21,20 @@ export interface LobbyPlayer {
 	isBot?: boolean;
 	isReplacement?: boolean; // true when a human was swapped for a bot mid-game
 	tutorialSeen?: boolean; // finished or skipped the tutorial in an earlier game in this lobby
+	// Signed-in players' Discord account - recorded with the game so it shows in their stats.
+	// Never sent to other players.
+	discordId?: string;
+	discordName?: string;
+}
+
+export interface DiscordIdentity {
+	id: string;
+	username: string;
+}
+
+// A signed-in player's in-game name, unique within the lobby
+export function discordPlayerName(username: string, lobby?: Lobby, selfId?: string): string {
+	return baseDiscordName(username, lobby?.players.filter((p) => p.id !== selfId).map((p) => p.name));
 }
 
 export interface Lobby {
@@ -66,12 +81,21 @@ export class LobbyManager {
 		return code;
 	}
 
-	createLobby(hostPlayerId: string, hostName: string): Lobby {
+	createLobby(hostPlayerId: string, hostName: string, discord?: DiscordIdentity | null): Lobby {
 		const code = this.genCode();
 		const lobby: Lobby = {
 			code,
 			hostId: hostPlayerId,
-			players: [{ id: hostPlayerId, name: hostName, socketId: null, connected: true }],
+			players: [
+				{
+					id: hostPlayerId,
+					name: hostName,
+					socketId: null,
+					connected: true,
+					discordId: discord?.id,
+					discordName: discord?.username,
+				},
+			],
 			game: null,
 			createdAt: Date.now(),
 			isPublic: false,
@@ -91,12 +115,15 @@ export class LobbyManager {
 		return this.lobbies.get((code || "").toUpperCase());
 	}
 
-	joinLobby(code: string, playerId: string, name: string): Lobby {
+	// discord: the player's signed-in account, if any. Their name is then their Discord name.
+	joinLobby(code: string, playerId: string, name: string, discord?: DiscordIdentity | null): Lobby {
 		const lobby = this.getLobby(code);
 		if (!lobby) throw new Error("Lobby not found. Check the code and try again.");
+		if (discord) name = discordPlayerName(discord.username, lobby, playerId);
 		const existing = lobby.players.find((p) => p.id === playerId);
 		if (existing) {
-			existing.name = name || existing.name;
+			if (!lobby.game) existing.name = name || existing.name;
+			this.setDiscord(lobby, existing, discord);
 			return lobby;
 		}
 		if (lobby.game?.started) throw new Error("That game has already started.");
@@ -104,8 +131,25 @@ export class LobbyManager {
 			throw new Error(`Lobby is full (${MAX_PLAYERS} players max).`);
 		if (lobby.players.some((p) => p.name.toLowerCase() === name.toLowerCase()))
 			throw new Error("That name is already taken in this lobby.");
-		lobby.players.push({ id: playerId, name, socketId: null, connected: true });
+		lobby.players.push({
+			id: playerId,
+			name,
+			socketId: null,
+			connected: true,
+			discordId: discord?.id,
+			discordName: discord?.username,
+		});
 		return lobby;
+	}
+
+	// Ties a seat to whoever is signed in on it. Outside a game a signed-in player's name
+	// follows their Discord name; during one, reconnecting signed out keeps the seat's account
+	// so the game still counts towards their stats.
+	setDiscord(lobby: Lobby, player: LobbyPlayer, discord: DiscordIdentity | null | undefined): void {
+		if (!discord && lobby.game) return;
+		player.discordId = discord?.id;
+		player.discordName = discord?.username;
+		if (discord && !lobby.game) player.name = discordPlayerName(discord.username, lobby, player.id);
 	}
 
 	deleteLobby(code: string): void {
@@ -186,9 +230,10 @@ export class LobbyManager {
 		lobby.packs = next;
 	}
 
+	// Lobbies closest to filling up first (they'll start soonest), then the newest
 	listPublicLobbies(search?: string, page = 0, pageSize = 10): LobbiesPage {
 		const q = (search ?? "").toLowerCase().trim();
-		const all: PublicLobbyEntry[] = [];
+		const all: (PublicLobbyEntry & { createdAt: number })[] = [];
 		for (const lobby of this.lobbies.values()) {
 			if (!lobby.isPublic || lobby.game || lobby.players.length >= MAX_PLAYERS)
 				continue;
@@ -201,10 +246,12 @@ export class LobbyManager {
 				hostName,
 				playerCount: lobby.players.length,
 				packs: normalizePacks(lobby.packs),
+				createdAt: lobby.createdAt,
 			});
 		}
+		all.sort((a, b) => b.playerCount - a.playerCount || b.createdAt - a.createdAt);
 		return {
-			entries: all.slice(page * pageSize, (page + 1) * pageSize),
+			entries: all.slice(page * pageSize, (page + 1) * pageSize).map(({ createdAt: _c, ...e }) => e),
 			total: all.length,
 			page,
 			pageSize,

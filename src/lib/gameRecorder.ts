@@ -7,8 +7,9 @@ import type { SheepKind } from "./types";
 const EVENT_CHUNK = 500;
 const SHEEP_KINDS: SheepKind[] = ["basic", "half_rainbow", "full_rainbow", "painted", "franken_heads", "franken_butts"];
 
-// Writes a finished (or abandoned) game to MySQL. Only seat numbers are stored -
-// never names, player ids, lobby codes or anything else that could identify someone.
+// Writes a finished (or abandoned) game to MySQL. Players are stored by seat number -
+// signed-in players also get their Discord account and name, so they can see their own
+// history. Signed-out players, player ids and lobby codes are never stored.
 export async function recordGame(lobby: Lobby, status: "completed" | "abandoned"): Promise<void> {
 	const game = lobby.game;
 	if (!db || !game || !game.started || game.recorded) return;
@@ -23,6 +24,14 @@ export async function recordGame(lobby: Lobby, status: "completed" | "abandoned"
 	const isBot = (id: string) => id.startsWith("bot_");
 	const wasReplaced = (id: string) =>
 		!!lobbyPlayer(id)?.isReplacement || events.some((e) => e.type === "player_replaced" && e.actor === id);
+	// One Discord account signed in at two seats only gets the first
+	const claimed = new Set<string>();
+	const discordOf = (id: string) => {
+		const p = lobbyPlayer(id);
+		if (!p?.discordId || isBot(id) || claimed.has(p.discordId)) return null;
+		claimed.add(p.discordId);
+		return { id: p.discordId, name: (p.discordName ?? p.name).slice(0, 100) };
+	};
 
 	const count = (type: string, pred: (e: (typeof events)[number]) => boolean = () => true) =>
 		events.filter((e) => e.type === type && pred(e)).length;
@@ -85,11 +94,14 @@ export async function recordGame(lobby: Lobby, status: "completed" | "abandoned"
 			const fieldPts = p.field.reduce((sum, e) => sum + entityPoints(e), 0);
 			const penalty = p.hand.filter((c) => c.category === "challenge").length * 3;
 			const kinds = Object.fromEntries(SHEEP_KINDS.map((k) => [k, p.field.filter((e) => e.kind === k).length]));
+			const discord = discordOf(id);
 			return [
 				gameId,
 				s,
 				isBot(id),
 				wasReplaced(id),
+				discord?.id ?? null,
+				discord?.name ?? null,
 				results ? results.scores[id] : null,
 				results ? placements.get(id)! : null,
 				results ? results.winnerId === id : false,
@@ -107,7 +119,7 @@ export async function recordGame(lobby: Lobby, status: "completed" | "abandoned"
 			];
 		});
 		await conn.query(
-			`INSERT INTO game_players (game_id, seat, is_bot, was_replaced, score, placement, is_winner,
+			`INSERT INTO game_players (game_id, seat, is_bot, was_replaced, discord_id, username, score, placement, is_winner,
 				field_points, challenge_penalty, sheep_count, hand_size, ${SHEEP_KINDS.join(", ")},
 				turns_taken, sheep_built, actions_played, challenges_played, challenges_won, times_targeted) VALUES ?`,
 			[playerRows],

@@ -5,6 +5,7 @@ import { Info } from "lucide-react";
 import type { Filters } from "@/lib/analyticsSchema";
 import type { DiscordProfile } from "@/lib/roles";
 import { EXPANSION_PACKS, PACKS } from "@/lib/deck";
+import { avatarUrl } from "@/lib/avatar";
 
 export class ApiError extends Error {
 	constructor(
@@ -30,12 +31,7 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
 	return json as T;
 }
 
-export function avatarUrl(id: string, avatar: string | null): string {
-	if (avatar) return `https://cdn.discordapp.com/avatars/${id}/${avatar}.png?size=32`;
-	// Discord's default avatar for accounts without one
-	const idx = Number((BigInt(id) >> BigInt(22)) % BigInt(6));
-	return `https://cdn.discordapp.com/embed/avatars/${idx}.png`;
-}
+export { avatarUrl };
 
 // Discord avatar and name with the account ID underneath
 export function UserCell({ user, you }: { user: DiscordProfile; you?: boolean }) {

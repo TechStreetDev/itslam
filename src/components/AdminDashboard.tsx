@@ -8,8 +8,8 @@ import { packsLabel } from "@/lib/deck";
 import { ApiError, FilterBar, Loading, Message, SectionTitle, Stat, StatGrid, api } from "./admin/Shared";
 import { ActionsTab, ChallengesTab, OverviewTab, SeatsTab, SheepTab } from "./admin/TopicTabs";
 import { GamesTab } from "./admin/GamesTab";
+import { PlayersTab } from "./admin/PlayersTab";
 import { ExplorerTab } from "./admin/ExplorerTab";
-import { RolesTab } from "./admin/RolesTab";
 import { ReportsTab } from "./admin/ReportsTab";
 import type { Permission } from "@/lib/roleDefs";
 
@@ -24,7 +24,7 @@ const TABS = [
 	{ id: "challenges", label: "Challenges", needsDb: true, filtered: true, perm: "view_stats" },
 	{ id: "seats", label: "Seats & balance", needsDb: true, filtered: true, perm: "view_stats" },
 	{ id: "explore", label: "Explore", needsDb: true, filtered: true, perm: "manage" },
-	{ id: "roles", label: "Roles", needsDb: false, filtered: false, perm: "manage" },
+	{ id: "players", label: "Players & roles", needsDb: true, filtered: false, perm: "view_stats" },
 	{ id: "reports", label: "Reports", needsDb: false, filtered: false, perm: "moderate_chat" },
 ] as const satisfies readonly { id: string; label: string; needsDb: boolean; filtered: boolean; perm: Permission }[];
 type TabId = (typeof TABS)[number]["id"];
@@ -143,12 +143,12 @@ export function AdminDashboard() {
 								{current.id === "live" && <LiveTab />}
 								{current.id === "overview" && <OverviewTab filters={filters} />}
 								{current.id === "games" && <GamesTab filters={filters} canManage={canManage} />}
+								{current.id === "players" && <PlayersTab canManage={canManage} myId={auth.status.user.id} />}
 								{current.id === "sheep" && <SheepTab filters={filters} />}
 								{current.id === "actions" && <ActionsTab filters={filters} />}
 								{current.id === "challenges" && <ChallengesTab filters={filters} />}
 								{current.id === "seats" && <SeatsTab filters={filters} />}
 								{current.id === "explore" && <ExplorerTab filters={filters} />}
-								{current.id === "roles" && <RolesTab myId={auth.status.user.id} mysql={mysql} />}
 								{current.id === "reports" && <ReportsTab myId={auth.status.user.id} mysql={mysql} />}
 							</>
 						)}

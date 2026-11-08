@@ -2,7 +2,7 @@ import { createServer, IncomingMessage, ServerResponse } from "http";
 import next from "next";
 import { Server, Socket } from "socket.io";
 import * as engine from "./src/lib/engine";
-import { lobbyManager, Lobby } from "./src/lib/lobbyManager";
+import { lobbyManager, Lobby, discordPlayerName } from "./src/lib/lobbyManager";
 import * as bot from "./src/lib/bot";
 import { connectRedis } from "./src/lib/redis";
 import { saveLobby, deleteLobby as deleteFromRedis, loadAllLobbies } from "./src/lib/persistence";
@@ -23,6 +23,7 @@ import { can, initRoles } from "./src/lib/roles";
 import { pruneLogins } from "./src/lib/logins";
 import { recordGame } from "./src/lib/gameRecorder";
 import { handleAdminApi, readJson, sendJson } from "./src/lib/adminApi";
+import { handlePlayerStatsApi } from "./src/lib/playerStats";
 import { CHAT_MAX_LENGTH, QUICK_RESPONSES, REPORT_DETAILS_MAX, REPORT_REASONS, SessionInfo } from "./src/lib/types";
 import {
 	ChatRecord,
@@ -79,19 +80,6 @@ function muteText(until: number | null): string {
 // Discord Activity players are keyed by their Discord ID, so only that user's session may use it
 const ACTIVITY_PLAYER_PREFIX = "discord_";
 
-// Discord display names can hold anything - squeeze them into the lobby's name rules
-function activityName(username: string, lobby?: Lobby): string {
-	let base = username.replace(/[^a-zA-Z0-9 ]/g, "").replace(/\s+/g, " ").trim().slice(0, 19);
-	if (base.length < 3) base = "Shepherd";
-	const taken = new Set(lobby?.players.map((p) => p.name.toLowerCase()) ?? []);
-	let name = base;
-	for (let i = 2; taken.has(name.toLowerCase()); i++) {
-		const suffix = ` ${i}`;
-		name = base.slice(0, 19 - suffix.length) + suffix;
-	}
-	return name;
-}
-
 app.prepare().then(async () => {
 	const httpServer = createServer((req, res) => {
 		const url = new URL(req.url || "/", "http://localhost");
@@ -136,6 +124,7 @@ app.prepare().then(async () => {
 					user: user && { ...user, ...userAccess(user) },
 				});
 			default:
+				if (await handlePlayerStatsApi(req, res, url, user)) return;
 				if (
 					await handleAdminApi(req, res, url, user, () =>
 						collectStats(lobbyManager.getAllLobbies(), io.engine.clientsCount),
@@ -437,6 +426,13 @@ app.prepare().then(async () => {
 			}
 			socketUser = user;
 			sendSession();
+			// Signed in from inside a lobby - their seat takes their Discord account and name
+			const lobby = lobbyManager.getLobby(currentCode);
+			const p = lobby && lobbyManager.findPlayer(lobby, currentPlayerId);
+			if (lobby && p && !p.isBot) {
+				lobbyManager.setDiscord(lobby, p, user);
+				broadcast(lobby);
+			}
 		});
 
 		socket.on("chat_send", ({ text, quick }: { text?: string; quick?: number }) => {
@@ -566,8 +562,9 @@ app.prepare().then(async () => {
 			({ playerId, name }: { playerId: string; name: string }) => {
 				try {
 					checkPlayerId(playerId);
-					const cleanName = validateName(name);
-					const lobby = lobbyManager.createLobby(playerId, cleanName);
+					// Signed-in players play under their Discord name
+					const cleanName = socketUser ? discordPlayerName(socketUser.username) : validateName(name);
+					const lobby = lobbyManager.createLobby(playerId, cleanName, socketUser);
 					track("lobbies_created");
 					currentCode = lobby.code;
 					currentPlayerId = playerId;
@@ -598,12 +595,8 @@ app.prepare().then(async () => {
 					checkPlayerId(playerId);
 					if (lobbyManager.getLobby(code)?.activityId)
 						throw new Error("That lobby is a Discord Activity - join it from the channel.");
-					const cleanName = validateName(name);
-					const lobby = lobbyManager.joinLobby(
-						code,
-						playerId,
-						cleanName,
-					);
+					const cleanName = socketUser ? "" : validateName(name);
+					const lobby = lobbyManager.joinLobby(code, playerId, cleanName, socketUser);
 					currentCode = lobby.code;
 					currentPlayerId = playerId;
 					clearBotTakeover(playerId);
@@ -629,6 +622,7 @@ app.prepare().then(async () => {
 					if (!lobby) throw new Error("That lobby no longer exists.");
 					const p = lobbyManager.findPlayer(lobby, playerId);
 					if (!p) throw new Error("You are not part of that lobby.");
+					lobbyManager.setDiscord(lobby, p, socketUser);
 					currentCode = lobby.code;
 					currentPlayerId = playerId;
 					clearBotTakeover(playerId);
@@ -655,11 +649,11 @@ app.prepare().then(async () => {
 					throw new Error("Invalid Activity instance.");
 				let lobby = lobbyManager.findActivityLobby(instanceId);
 				if (!lobby) {
-					lobby = lobbyManager.createLobby(activityPlayerId, activityName(socketUser.username));
+					lobby = lobbyManager.createLobby(activityPlayerId, discordPlayerName(socketUser.username), socketUser);
 					lobby.activityId = instanceId;
 					track("lobbies_created");
 				} else if (!lobbyManager.findPlayer(lobby, activityPlayerId)) {
-					lobbyManager.joinLobby(lobby.code, activityPlayerId, activityName(socketUser.username, lobby));
+					lobbyManager.joinLobby(lobby.code, activityPlayerId, "", socketUser);
 				}
 				const p = lobbyManager.findPlayer(lobby, activityPlayerId)!;
 				currentCode = lobby.code;
@@ -736,11 +730,16 @@ app.prepare().then(async () => {
 
 		socket.on(
 			"list_lobbies",
-			(payload: { search?: string; page?: number } | undefined) => {
-				const { search, page } = payload ?? {};
+			(payload: { search?: string; page?: number; pageSize?: number } | undefined) => {
+				const { search, page, pageSize } = payload ?? {};
+				const size = Number.isInteger(pageSize) ? Math.min(20, Math.max(1, pageSize!)) : undefined;
 				socket.emit(
 					"lobbies_list",
-					lobbyManager.listPublicLobbies(search, page),
+					lobbyManager.listPublicLobbies(
+						typeof search === "string" ? search.slice(0, 50) : undefined,
+						Number.isInteger(page) && page! >= 0 ? page : 0,
+						size,
+					),
 				);
 			},
 		);

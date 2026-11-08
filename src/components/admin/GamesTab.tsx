@@ -32,6 +32,12 @@ const SORTS = [
 	{ value: "highest_score", label: "Highest score" },
 ] as const;
 
+// Signed-in players by their Discord name; everyone else by seat
+const seatName = (players: Row[] | undefined, seat: number) => {
+	const p = players?.find((x) => n(x.seat) === seat);
+	return p?.username ?? `Seat ${seat + 1}`;
+};
+
 const sourceLabel = (s: string | null) => (s === "discord" ? "Discord" : s === "website" ? "Website" : "Unknown");
 const fmtDate = (s: string) => new Date(s).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
@@ -102,7 +108,7 @@ export function GamesTab({ filters, canManage }: { filters: Filters; canManage: 
 									<td className="px-3 py-2 whitespace-nowrap">{fmtDuration(n(g.duration_ms))}</td>
 									<td className="px-3 py-2 tabular-nums">{g.turns}</td>
 									<td className="px-3 py-2 whitespace-nowrap">
-										{g.winner_seat === null ? "-" : `Seat ${n(g.winner_seat) + 1}${g.winner_is_bot ? " (bot)" : ""}`}
+										{g.winner_seat === null ? "-" : `${seatName(g.players, n(g.winner_seat))}${g.winner_is_bot ? " (bot)" : ""}`}
 										{g.was_tiebreak ? " · tiebreak" : ""}
 									</td>
 									<td className="px-3 py-2 tabular-nums">{g.winning_score ?? "-"}</td>
@@ -130,10 +136,10 @@ export function GamesTab({ filters, canManage }: { filters: Filters; canManage: 
 	);
 }
 
-function describeEvent(e: Row): string {
+function describeEvent(e: Row, name: (seat: number) => string): string {
 	const d = e.data ?? {};
-	const who = e.actor_seat === null ? "" : `Seat ${n(e.actor_seat) + 1}`;
-	const target = e.target_seat === null ? "" : `Seat ${n(e.target_seat) + 1}`;
+	const who = e.actor_seat === null ? "" : name(n(e.actor_seat));
+	const target = e.target_seat === null ? "" : name(n(e.target_seat));
 	switch (e.type) {
 		case "draw":
 			return `${who} drew ${d.cards} (deck ${d.deckLeft})`;
@@ -184,7 +190,7 @@ function GameDetail({
 		if (!state.data) return [];
 		const { players, events } = state.data;
 		return players.map((p, i) => ({
-			label: `Seat ${n(p.seat) + 1}`,
+			label: seatName(players, n(p.seat)),
 			color: SERIES[i],
 			points: [
 				{ x: 0, y: 0 },
@@ -235,7 +241,7 @@ function GameDetail({
 			<StatGrid>
 				<Stat label="Duration" value={fmtDuration(n(g.duration_ms))} info="Real time from the game starting (including the tutorial) to it ending." />
 				<Stat label="Turns" value={g.turns} info="Turns taken in this game, counting every player's turn." />
-				<Stat label="Winner" value={g.winner_seat === null ? "-" : `Seat ${n(g.winner_seat) + 1}`} hint={g.was_tiebreak ? "won a tiebreak" : undefined} info="Seat that won. Seat 1 took the first turn. Blank if the game was abandoned." />
+				<Stat label="Winner" value={g.winner_seat === null ? "-" : seatName(players, n(g.winner_seat))} hint={g.was_tiebreak ? "won a tiebreak" : undefined} info="Seat that won. Seat 1 took the first turn. Blank if the game was abandoned." />
 				<Stat label="Winning score" value={g.winning_score ?? "-"} info="The winner's final score, after challenge-card penalties." />
 				<Stat label="Sheep built" value={g.sheep_built} info="Sheep added to any field during this game, from hand or recovered from the discard pile." />
 				<Stat label="Actions / BodySwaps" value={`${g.actions_played} / ${g.bodyswaps}`} info="Action cards played (Wheat, Wolf, Yoink) / BodySwaps made, across all players." />
@@ -250,11 +256,12 @@ function GameDetail({
 			</div>
 
 			<div className="mt-3">
-				<ChartCard title="Players" info="Per-seat breakdown for this game: final standing, points, end-of-game field and hand, and what each player did.">
+				<ChartCard title="Players" info="Per-seat breakdown for this game: who was signed in, final standing, points, end-of-game field and hand, and what each player did.">
 					<DataTable
-						columns={["Seat", "Type", "Place", "Score", "Field pts", "Penalty", "Sheep", "Hand", "Basic", "½ rainbow", "Rainbow", "Painted", "2-head", "2-butt", "Turns", "Built", "Actions", "Challenges", "Won", "Targeted"]}
+						columns={["Seat", "Player", "Type", "Place", "Score", "Field pts", "Penalty", "Sheep", "Hand", "Basic", "½ rainbow", "Rainbow", "Painted", "2-head", "2-butt", "Turns", "Built", "Actions", "Challenges", "Won", "Targeted"]}
 						rows={players.map((p) => [
 							n(p.seat) + 1,
+							p.username ?? (p.is_bot ? "-" : "Guest"),
 							p.is_bot ? "Bot" : p.was_replaced ? "Human → bot" : "Human",
 							p.placement ?? "-",
 							p.score ?? "-",
@@ -285,7 +292,7 @@ function GameDetail({
 						<div>
 							<div className="flex items-center gap-1.5">
 								<h3 className="font-extrabold text-[14px] text-[#3d1a2c]">Event timeline</h3>
-								<InfoTip text="Every recorded event in this game in order - draws, sheep built, actions, challenges, coin flips, discards and turn ends. Players are shown by seat only." />
+								<InfoTip text="Every recorded event in this game in order - draws, sheep built, actions, challenges, coin flips, discards and turn ends. Signed-in players are shown by Discord name, everyone else by seat." />
 							</div>
 							<p className="text-[12px] text-[#8a5a70] font-semibold">
 								{shown.length} of {events.length} events
@@ -295,7 +302,7 @@ function GameDetail({
 					</div>
 					<DataTable
 						columns={["#", "Time", "Turn", "Event", "Details"]}
-						rows={shown.map((e) => [e.seq, fmtDuration(n(e.t_ms)), e.turn, prettyKey(e.type), describeEvent(e)])}
+						rows={shown.map((e) => [e.seq, fmtDuration(n(e.t_ms)), e.turn, prettyKey(e.type), describeEvent(e, (seat) => seatName(players, seat))])}
 					/>
 				</section>
 			</div>

@@ -49,6 +49,7 @@ export function parseFilters(params: URLSearchParams): Filters {
 		bots: oneOf(params.get("bots"), ["any", "none", "some"], "any"),
 		visibility: oneOf(params.get("visibility"), ["any", "public", "private"], "any"),
 		packs: oneOf(params.get("packs"), ["any", "base", "expansions", ...EXPANSION_PACKS], "any"),
+		player: /^\d{1,32}$/.test(params.get("player") || "") ? params.get("player")! : undefined,
 	};
 }
 
@@ -80,6 +81,10 @@ function gameWhere(f: Filters, alias = "g"): { sql: string; params: unknown[] } 
 	else if (f.packs && f.packs !== "any") {
 		clauses.push(`FIND_IN_SET(?, ${alias}.packs) > 0`);
 		params.push(f.packs);
+	}
+	if (f.player) {
+		clauses.push(`EXISTS (SELECT 1 FROM game_players fp WHERE fp.game_id = ${alias}.id AND fp.discord_id = ?)`);
+		params.push(f.player);
 	}
 	return { sql: clauses.length ? clauses.join(" AND ") : "1=1", params };
 }
@@ -174,10 +179,17 @@ export async function listGames(f: Filters, page: number, pageSize: number, sort
 	const w = gameWhere(f);
 	const order = GAME_SORTS[sort] ?? GAME_SORTS.newest;
 	const [{ total }] = await q<{ total: number }>(`SELECT COUNT(*) AS total FROM games g WHERE ${w.sql}`, w.params);
-	const rows = await q(
+	const games = await q(
 		`SELECT g.* FROM games g WHERE ${w.sql} ORDER BY ${order} LIMIT ? OFFSET ?`,
 		[...w.params, pageSize, page * pageSize],
 	);
+	// Who sat where - names are only known for players who were signed in
+	const seats = games.length
+		? await q("SELECT game_id, seat, is_bot, discord_id, username FROM game_players WHERE game_id IN (?) ORDER BY seat", [
+				games.map((g) => g.id),
+			])
+		: [];
+	const rows = games.map((g) => ({ ...g, players: seats.filter((s) => s.game_id === g.id) }));
 	return { total: Number(total), page, pageSize, rows };
 }
 

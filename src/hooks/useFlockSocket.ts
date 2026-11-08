@@ -255,18 +255,20 @@ export function useFlockSocket() {
 		[emit],
 	);
 
+	// Signed-in players use their Discord name - keep the typed one for when they're signed out
+	const signedIn = !!session?.user;
 	const createLobby = useCallback(
 		(name: string) => {
-			localStorage.setItem("flock_name", name);
+			if (!signedIn) localStorage.setItem("flock_name", name);
 			setLandingError("");
 			emit("create_lobby", { playerId: myIdRef.current, name });
 		},
-		[emit],
+		[emit, signedIn],
 	);
 
 	const joinLobby = useCallback(
 		(name: string, code: string) => {
-			localStorage.setItem("flock_name", name);
+			if (!signedIn) localStorage.setItem("flock_name", name);
 			setLandingError("");
 			emit("join_lobby", {
 				playerId: myIdRef.current,
@@ -274,7 +276,7 @@ export function useFlockSocket() {
 				code: code.toUpperCase(),
 			});
 		},
-		[emit],
+		[emit, signedIn],
 	);
 
 	const joinActivity = useCallback(() => {
@@ -293,7 +295,7 @@ export function useFlockSocket() {
 	}, [emit, activity]);
 
 	const listLobbies = useCallback(
-		(opts?: { search?: string; page?: number }) => {
+		(opts?: { search?: string; page?: number; pageSize?: number }) => {
 			emit("list_lobbies", opts ?? {});
 		},
 		[emit],
