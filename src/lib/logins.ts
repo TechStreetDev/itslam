@@ -1,19 +1,6 @@
 import { db } from "./db";
 import type { SessionUser } from "./auth";
 
-// Login history is personal data - keep it only as long as the privacy policy says
-export const LOGIN_RETENTION_DAYS = 90;
-
-export async function pruneLogins(): Promise<void> {
-	if (!db) return;
-	try {
-		const cutoff = new Date(Date.now() - LOGIN_RETENTION_DAYS * 24 * 60 * 60 * 1000);
-		await db.query("DELETE FROM logins WHERE created_at < ?", [cutoff]);
-	} catch (e) {
-		console.error("[MySQL] pruneLogins failed:", (e as Error).message);
-	}
-}
-
 // Records a successful Discord login, and keeps the account's entry in `users` up to date.
 // Failures are logged, never thrown - a broken history table shouldn't stop anyone logging in.
 export async function recordLogin(user: SessionUser, isAdmin: boolean): Promise<void> {

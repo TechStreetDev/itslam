@@ -131,6 +131,17 @@ export async function userDetail(discordId: string) {
 	return { user, stats: await playerSummary(discordId), role: role ?? null };
 }
 
+// One page of an account's logins, newest first. Name and avatar are as they were at the time of that login.
+export async function loginHistory(discordId: string, page: number, pageSize: number) {
+	const [{ total }] = await q<{ total: number }>("SELECT COUNT(*) AS total FROM logins WHERE discord_id = ?", [discordId]);
+	const rows = await q(
+		`SELECT id, username, avatar, is_admin, created_at FROM logins
+		WHERE discord_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+		[discordId, pageSize, page * pageSize],
+	);
+	return { total: Number(total), page, pageSize, rows };
+}
+
 // Handles /api/me/stats and /api/me/games for the signed-in player. Returns false for other paths.
 export async function handlePlayerStatsApi(
 	req: IncomingMessage,

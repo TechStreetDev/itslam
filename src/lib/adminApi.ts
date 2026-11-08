@@ -17,7 +17,7 @@ import {
 	explore,
 } from "./analytics";
 import type { ExploreQuery } from "./analyticsSchema";
-import { listUsers, userDetail } from "./playerStats";
+import { listUsers, loginHistory, userDetail } from "./playerStats";
 import { listMutes, listReports, removeMute, reportDetail, setMute, setReportStatus } from "./chatModeration";
 
 const MAX_BODY = 64 * 1024;
@@ -75,6 +75,7 @@ export async function handleAdminApi(
 	const gameMatch = path.match(/^\/api\/admin\/games\/(\d+)$/);
 	const roleMatch = path.match(/^\/api\/admin\/roles\/(\d+)$/);
 	const playerMatch = path.match(/^\/api\/admin\/players\/(\d+)$/);
+	const playerLoginsMatch = path.match(/^\/api\/admin\/players\/(\d+)\/logins$/);
 	// Viewers can read statistics; everything else needs the admin role
 	const manageOnly =
 		(gameMatch && method === "DELETE") ||
@@ -106,6 +107,9 @@ export async function handleAdminApi(
 		} else if (playerMatch && method === "GET") {
 			body = await userDetail(playerMatch[1]);
 			if (!body) throw new HttpError(404, "Player not found");
+		} else if (playerLoginsMatch && method === "GET") {
+			const page = Math.max(0, parseInt(url.searchParams.get("page") || "0", 10) || 0);
+			body = await loginHistory(playerLoginsMatch[1], page, 10);
 		} else if (gameMatch && method === "GET") body = await gameDetail(Number(gameMatch[1]));
 		else if (gameMatch && method === "DELETE") {
 			await deleteGame(Number(gameMatch[1]));

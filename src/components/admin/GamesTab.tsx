@@ -41,11 +41,21 @@ const seatName = (players: Row[] | undefined, seat: number) => {
 const sourceLabel = (s: string | null) => (s === "discord" ? "Discord" : s === "website" ? "Website" : "Unknown");
 const fmtDate = (s: string) => new Date(s).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
-export function GamesTab({ filters, canManage }: { filters: Filters; canManage: boolean }) {
+export function GamesTab({
+	filters,
+	canManage,
+	pageSize = 25,
+	title,
+}: {
+	filters: Filters;
+	canManage: boolean;
+	pageSize?: number;
+	// Shown as a heading in place of the plain game count, beside the sort
+	title?: string;
+}) {
 	const [page, setPage] = useState(0);
 	const [sort, setSort] = useState<(typeof SORTS)[number]["value"]>("newest");
 	const [selected, setSelected] = useState<number | null>(null);
-	const pageSize = 25;
 	const list = useApi<{ total: number; rows: Row[] }>(
 		`/api/admin/games?${filtersToQuery(filters, { page, pageSize, sort })}`,
 	);
@@ -67,9 +77,16 @@ export function GamesTab({ filters, canManage }: { filters: Filters; canManage: 
 	return (
 		<>
 			<div className="flex items-end justify-between gap-2 mb-2">
-				<p className="text-[13px] font-semibold text-[#8a5a70]">
-					{list.data ? `${list.data.total.toLocaleString()} games` : ""}
-				</p>
+				{title ? (
+					<h3 className="font-extrabold text-[15px] text-[#7a3a58]">
+						{title}
+						{list.data ? ` (${list.data.total.toLocaleString()})` : ""}
+					</h3>
+				) : (
+					<p className="text-[13px] font-semibold text-[#8a5a70]">
+						{list.data ? `${list.data.total.toLocaleString()} games` : ""}
+					</p>
+				)}
 				<Select label="Sort" value={sort} onChange={(v) => (setSort(v), setPage(0))} options={[...SORTS]} />
 			</div>
 			{list.error && <ErrorNote error={list.error} onRetry={list.reload} />}

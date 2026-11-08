@@ -20,7 +20,6 @@ import {
 import { collectStats, track } from "./src/lib/stats";
 import { connectDb, db } from "./src/lib/db";
 import { can, initRoles } from "./src/lib/roles";
-import { pruneLogins } from "./src/lib/logins";
 import { recordGame } from "./src/lib/gameRecorder";
 import { handleAdminApi, readJson, sendJson } from "./src/lib/adminApi";
 import { handlePlayerStatsApi, playerHistory, playerSummary } from "./src/lib/playerStats";
@@ -445,8 +444,6 @@ app.prepare().then(async () => {
 		console.log(`> Restored ${storedLobbies.length} lobby/lobbies from Redis`);
 
 	setInterval(() => lobbyManager.removeEmptyLobbies(), 60 * 1000).unref();
-	pruneLogins();
-	setInterval(pruneLogins, 6 * 60 * 60 * 1000).unref();
 	pruneReports();
 	setInterval(pruneReports, 6 * 60 * 60 * 1000).unref();
 	// Forget report rate limits once they've run out

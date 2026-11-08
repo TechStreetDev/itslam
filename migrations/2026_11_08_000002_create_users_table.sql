@@ -1,5 +1,5 @@
 -- Everyone who has ever logged in with Discord, so admins can find players and their games.
--- Unlike `logins` (pruned after 90 days) this keeps one row per account.
+-- Unlike `logins` (one row per login) this keeps one row per account.
 CREATE TABLE users (
 	discord_id VARCHAR(32) NOT NULL PRIMARY KEY,
 	username VARCHAR(100) NOT NULL,

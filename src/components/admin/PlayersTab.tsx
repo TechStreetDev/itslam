@@ -227,11 +227,80 @@ function PlayerDetail({
 						/>
 						<Stat label="Best score" value={state.data.stats.bestScore ?? "-"} info="Highest final score in a finished game." />
 					</StatGrid>
-					<h3 className="font-extrabold text-[15px] text-[#7a3a58] mt-5 mb-2">Their games</h3>
 					{/* Every game they were logged in for, finished or not - click one for the full breakdown */}
-					<GamesTab filters={{ status: "all", player: id }} canManage={canManage} />
+					<div className="mt-5">
+						<GamesTab filters={{ status: "all", player: id }} canManage={canManage} pageSize={10} title="Their games" />
+					</div>
+					<LoginHistory id={id} />
 				</>
 			)}
+		</>
+	);
+}
+
+// Every Discord login for this account, newest first
+function LoginHistory({ id }: { id: string }) {
+	const [page, setPage] = useState(0);
+	const state = useApi<{ total: number; pageSize: number; rows: Row[] }>(`/api/admin/players/${id}/logins?page=${page}`);
+	const data = state.data;
+	const totalPages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
+
+	return (
+		<>
+			<h3 className="font-extrabold text-[15px] text-[#7a3a58] mt-5 mb-2">
+				Login history{data ? ` (${data.total.toLocaleString()})` : ""}
+			</h3>
+			<div>
+				{state.error && <ErrorNote error={state.error} onRetry={state.reload} />}
+				{!data ? (
+					!state.error && <Loading />
+				) : data.rows.length === 0 ? (
+					<p className="text-[13px] font-semibold text-[#8a5a70] py-2">No logins recorded.</p>
+				) : (
+					<>
+						<p className="text-[12px] font-semibold text-[#8a5a70] mb-2">
+							Name and avatar are as they were at the time.
+						</p>
+						<div className="overflow-x-auto bg-white rounded-xl border-2 border-[#f5d0e8]">
+							<table className="w-full text-[13px] text-left">
+								<thead className="text-[11px] uppercase tracking-wide text-[#8a5a70]">
+									<tr>
+										{["When", "Logged in as", "Admin"].map((h) => (
+											<th key={h} className="px-3 py-2 font-extrabold whitespace-nowrap">
+												{h}
+											</th>
+										))}
+									</tr>
+								</thead>
+								<tbody className="text-[#3d1a2c] font-semibold">
+									{data.rows.map((l) => (
+										<tr key={l.id} className="border-t border-[#f5d0e8]">
+											<td className="px-3 py-2 whitespace-nowrap">{fmtDate(l.created_at)}</td>
+											<td className="px-3 py-2">
+												<UserCell user={{ id, username: l.username, avatar: l.avatar }} />
+											</td>
+											<td className="px-3 py-2">{l.is_admin ? "Yes" : "-"}</td>
+										</tr>
+									))}
+								</tbody>
+							</table>
+						</div>
+						{data.total > data.pageSize && (
+							<div className="flex items-center justify-between mt-3">
+								<button className={ghostButtonClass} disabled={page === 0} onClick={() => setPage(page - 1)}>
+									&larr; Newer
+								</button>
+								<span className="text-[12px] font-bold text-[#8a5a70]">
+									Page {page + 1} / {totalPages}
+								</span>
+								<button className={ghostButtonClass} disabled={page >= totalPages - 1} onClick={() => setPage(page + 1)}>
+									Older &rarr;
+								</button>
+							</div>
+						)}
+					</>
+				)}
+			</div>
 		</>
 	);
 }

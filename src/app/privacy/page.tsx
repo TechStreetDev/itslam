@@ -55,8 +55,8 @@ export default function PrivacyPage() {
 						with Discord is optional. If you do, you play under your
 						Discord name and the games you play are saved to your
 						personal stats and game history, which other players in
-						your lobby can view. We also keep a record of when you
-						logged in for 90 days. The tutorial video is hosted on
+						your lobby can view. We also keep a record of each time
+						you log in. The tutorial video is hosted on
 						YouTube.
 					</p>
 				</Section>
@@ -135,10 +135,9 @@ export default function PrivacyPage() {
 						Each time you log in, we also save a login record in our
 						database: your Discord account ID, username and avatar
 						as they were at the time, whether you are a site admin,
-						and the date and time. These records aren&rsquo;t shown
-						to anyone directly - they let us fill in your name and
-						avatar if an admin gives you a site role. Login records
-						are deleted automatically after 90 days.
+						and the date and time. Site admins and stats viewers can
+						see your login history, and it lets us fill in your name
+						and avatar if an admin gives you a site role.
 					</p>
 					<p>
 						If you have been given a site role (playtester,
@@ -254,7 +253,7 @@ export default function PrivacyPage() {
 						survive a server restart. Each lobby expires
 						automatically after 2 hours without activity, and is
 						removed sooner once everyone leaves. Login records are
-						deleted after 90 days, and role entries are removed when
+						kept, and role entries are removed when
 						all your roles are taken away. Game records, including
 						the Discord account and name on games you played while
 						logged in, and your entry in the player list are kept so
